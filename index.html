@@ -1,0 +1,56 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Ontario demand: prediction vs actual</title>
+<style>
+:root{--bg:#fff;--fg:#1d2733;--mut:#6b7785;--card:#f4f6f9;--ac:#d9480f;--bd:#dde2e8}
+@media(prefers-color-scheme:dark){:root{--bg:#14181d;--fg:#e6eaee;--mut:#8b96a3;--card:#1e242b;--bd:#313a44}}
+body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:1000px;margin:auto;padding:16px}h1{font-size:21px;margin:0 0 12px}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+@media(max-width:600px){.cards{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px}
+.card span{display:block;color:var(--mut);font-size:12px}.card b{font-size:26px}.card small{display:block;color:var(--mut)}
+canvas{width:100%;height:340px;display:block;background:var(--card);border:1px solid var(--bd);border-radius:10px}
+p{color:var(--mut);font-size:13px}select{font-size:14px;margin-left:8px}
+</style></head><body><main>
+<h1>Ontario electricity demand: prediction vs actual</h1>
+<div class="cards">
+<div class="card"><span>Latest prediction</span><b id="p">-</b><small id="pt"></small></div>
+<div class="card"><span>Latest actual (IESO)</span><b id="a">-</b><small id="at"></small></div>
+<div class="card"><span>Accuracy (last 7 days)</span><b id="m">-</b><small id="mt"></small></div></div>
+<label>Show <select id="rng"><option value="24">last 24 hours</option><option value="72">last 3 days</option>
+<option value="168" selected>last 7 days</option><option value="720">last 30 days</option></select></label>
+<canvas id="c"></canvas>
+<p id="msg"></p>
+<p>Orange = model prediction, white/dark = actual IESO demand. Times are EST (start of hour). Solid dots were predicted live
+before the hour's actual was known; hollow dots are retrospective fills. The page refreshes itself every 5 minutes.</p>
+<script src="demand_log.js"></script>
+<script>
+const $=id=>document.getElementById(id),css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const MW=v=>Math.round(v).toLocaleString()+" MW";
+function draw(){
+ const L=window.LOG||[];
+ if(!L.length){$("msg").textContent="No data yet: the first update hasn't run.";return}
+ const last=f=>[...L].reverse().find(f),lp=L[L.length-1],la=last(r=>r.actual!=null);
+ $("p").textContent=MW(lp.pred);$("pt").textContent="for "+lp.t.replace("T"," ")+" EST";
+ if(la){$("a").textContent=MW(la.actual);$("at").textContent="for "+la.t.replace("T"," ")+" EST"}
+ const wk=L.slice(-168).filter(r=>r.actual!=null),live=wk.filter(r=>!r.bf),use=live.length>=12?live:wk;
+ if(use.length){const e=use.map(r=>r.pred-r.actual),mae=e.reduce((s,x)=>s+Math.abs(x),0)/e.length;
+  $("m").textContent="±"+Math.round(mae)+" MW";
+  $("mt").textContent="mean absolute error, "+use.length+(use===live?" live":" retrospective")+" hours ("+(100*e.reduce((s,x,i)=>s+Math.abs(x)/use[i].actual,0)/e.length).toFixed(2)+"%)"}
+ const D=L.slice(-+$("rng").value),n=D.length,c=$("c"),r=c.getBoundingClientRect(),dp=devicePixelRatio||1;
+ c.width=r.width*dp;c.height=r.height*dp;const g=c.getContext("2d");g.scale(dp,dp);const w=r.width,h=r.height;
+ const ys=D.flatMap(r=>[r.pred,r.actual]).filter(v=>v!=null),lo=Math.min(...ys),hi=Math.max(...ys),p=(hi-lo)*.08||1,
+ a=lo-p,b=hi+p,Lm=56,R=12,T=10,Bt=28,X=i=>Lm+i/Math.max(n-1,1)*(w-Lm-R),Y=y=>T+(b-y)/(b-a)*(h-T-Bt);
+ g.font="11px system-ui";g.fillStyle=css("--mut");g.strokeStyle=css("--bd");g.lineWidth=1;
+ for(let i=0;i<=4;i++){const y=a+(b-a)*i/4;g.beginPath();g.moveTo(Lm,Y(y));g.lineTo(w-R,Y(y));g.stroke();g.fillText(Math.round(y).toLocaleString(),4,Y(y)+4)}
+ for(let i=0;i<=4;i++){const j=Math.round((n-1)*i/4);g.fillText(D[j].t.slice(5,13).replace("T"," ")+"h",X(j)-24,h-9)}
+ const seg=(k,col)=>{g.strokeStyle=col;g.lineWidth=2;g.beginPath();let pen=false;
+  D.forEach((r,i)=>{if(r[k]==null){pen=false;return}pen?g.lineTo(X(i),Y(r[k])):g.moveTo(X(i),Y(r[k]));pen=true});g.stroke()};
+ seg("actual",css("--fg"));seg("pred",css("--ac"));
+ if(n<=100)D.forEach((r,i)=>{g.beginPath();g.arc(X(i),Y(r.pred),3,0,7);
+  if(r.bf){g.strokeStyle=css("--ac");g.lineWidth=1.5;g.stroke()}else{g.fillStyle=css("--ac");g.fill()}});
+ $("msg").textContent="Last update: "+lp.t.replace("T"," ")+" EST";
+}
+function reload(){const s=document.createElement("script");s.src="demand_log.js?"+Date.now();s.onload=s.onerror=()=>{draw();s.remove()};document.head.appendChild(s)}
+$("rng").onchange=draw;addEventListener("resize",draw);setInterval(reload,300000);draw();
+</script></main></body></html>
