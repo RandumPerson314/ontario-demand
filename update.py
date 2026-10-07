@@ -114,6 +114,10 @@ live_local = live["timestamp"]
 
 # The target is the next local clock hour.
 target_local = live_local.ceil("h")
+local = (
+    idx.tz_localize("UTC")
+    .tz_convert("America/Toronto")
+)
 
 target_utc = (
     target_local
@@ -130,7 +134,7 @@ if target_utc in F.index:
             predict_demand(model, target_row).iloc[0]
         )
 
-        key = target_local.strftime("%Y-%m-%dT%H:00")
+        key = local.strftime("%Y-%m-%dT%H:00")
 
         log[key] = dict(
             t=key,
