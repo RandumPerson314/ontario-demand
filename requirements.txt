@@ -3,4 +3,4 @@ numpy
 requests
 holidays
 joblib
-scikit-learn==1.9.0
+scikit-learn

@@ -1,17 +1,14 @@
 """Shared data loading + feature engineering (training and live updates use the same code)."""
 import os
 import time
+from xml.etree import ElementTree
 
 import holidays
 import pandas as pd
 import requests
 
 BASE_TEMP = 18.0
-# Hours between the newest demand value we know and the hour being predicted.
-# 1 = use the previous hour's demand (most accurate). If IESO publishes too slowly
-# for live use, set 2 and retrain.
-HORIZON = 1
-LAGS = sorted({HORIZON, HORIZON + 1, HORIZON + 2, 24, 48, 168})
+TORONTO = "America/Toronto"
 
 CITIES = {  # name: (lat, lon, population weight)
     "toronto": (43.65, -79.38, 0.50), "ottawa": (45.42, -75.70, 0.15),
@@ -23,24 +20,36 @@ VARS = {"temperature_2m": "temp", "apparent_temperature": "feels",
         "wind_speed_10m": "wind", "cloud_cover": "cloud",
         "shortwave_radiation": "solar", "precipitation": "precip", "snowfall": "snow"}
 
-FEATURES = (list(VARS.values())
-            + ["hdd", "cdd", "temp_lag1", "temp_lag3", "temp_lag24", "temp_roll24",
-               "temp_roll72", "dtemp3"]
-            + [f"dem_lag{k}" for k in LAGS] + ["dem_roll24", "dem_trend"]
-            + ["hour", "dow", "month", "doy", "hol", "hol_before", "hol_after",
-               "xmas", "nonwork"])
+WEATHER = list(VARS.values())
+TEMP_DERIVED = ["hdd", "cdd", "temp_lag1", "temp_lag3", "temp_lag24", "temp_roll24",
+                "temp_roll72", "dtemp3"]
+CALENDAR = ["hour", "dow", "month", "doy", "hol", "hol_before", "hol_after", "xmas", "nonwork"]
+
+# "Now" model: knows demand up to the previous hour (accurate for the current hour).
+NOW_LAGS = [1, 2, 3, 24, 48, 168]
+NOW_FEATURES = (WEATHER + TEMP_DERIVED + [f"dem_lag{k}" for k in NOW_LAGS]
+                + ["dem_roll24", "dem_trend"] + CALENDAR)
+# "Week" model: only uses demand from >= 7 days earlier, so it can forecast 7 days ahead.
+WEEK_FEATURES = (WEATHER + TEMP_DERIVED + ["dtemp168", "dem_lag168", "dem_lag336", "dem_wk_mean"]
+                 + CALENDAR)
 
 _HOL = pd.to_datetime(list(holidays.Canada(subdiv="ON", years=range(2018, 2034)).keys()))
 
 
 def _get(url, params):
-    for i in range(6):
-        r = requests.get(url, params=params, timeout=120)
-        if r.status_code != 429:
+    for i in range(8):
+        try:
+            r = requests.get(url, params=params, timeout=120)
+            if r.status_code == 429:
+                raise requests.exceptions.RetryError("429 rate limited")
             r.raise_for_status()
             return r.json()
-        time.sleep(60 * (i + 1))
-    raise RuntimeError("Open-Meteo rate limit; try again later")
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                requests.exceptions.RetryError) as e:
+            wait = 60 * (i + 1)
+            print(f"{type(e).__name__}: retrying in {wait}s ({i + 1}/8)")
+            time.sleep(wait)
+    raise RuntimeError("Open-Meteo kept failing; wait an hour and rerun (cached data is kept)")
 
 
 def _hourly(d, wt):
@@ -66,20 +75,12 @@ def fetch_archive(years, cache="cache"):
                 continue
             end = min(pd.Timestamp(f"{y}-12-31"), now - pd.DateOffset(days=6))
             d = _get("https://archive-api.open-meteo.com/v1/archive", {
-                "latitude": la,
-                "longitude": lo,
-                "start_date": f"{y}-01-01",
-                "end_date": end.strftime("%Y-%m-%d"),
-                "hourly": ",".join(VARS),
-                "timezone": "GMT",
-            })
-
+                "latitude": la, "longitude": lo, "start_date": f"{y}-01-01",
+                "end_date": end.strftime("%Y-%m-%d"), "hourly": ",".join(VARS),
+                "timezone": "GMT"})
             df = pd.DataFrame(d["hourly"])
-
-            # Cache immediately after a successful download.
             if y < now.year:
                 df.to_csv(p, index=False)
-
             parts.append(df.assign(time=pd.to_datetime(df["time"])))
             print("fetched", name, y)
             time.sleep(10)
@@ -89,12 +90,13 @@ def fetch_archive(years, cache="cache"):
     return _finish(acc)
 
 
-def fetch_live():
-    """Last 10 days + today of weather (UTC index) from the forecast/analysis API."""
+def fetch_live(forecast_days=9):
+    """Last 14 days of weather + forecast (UTC index) from the forecast API."""
     C = list(CITIES.values())
     d = _get("https://api.open-meteo.com/v1/forecast", {
         "latitude": ",".join(str(c[0]) for c in C), "longitude": ",".join(str(c[1]) for c in C),
-        "hourly": ",".join(VARS), "past_days": 10, "forecast_days": 1, "timezone": "GMT"})
+        "hourly": ",".join(VARS), "past_days": 14, "forecast_days": forecast_days,
+        "timezone": "GMT"})
     d = d if isinstance(d, list) else [d]
     acc = None
     for x, c in zip(d, C):
@@ -104,154 +106,53 @@ def fetch_live():
 
 
 def fetch_demand(years):
-    """IESO hourly Ontario demand, indexed by naive UTC hour."""
-    from zoneinfo import ZoneInfo
+    """IESO hourly Ontario demand, indexed by naive UTC hour start.
 
+    IESO reports are in Eastern *Standard* Time all year (no daylight saving),
+    so EST = UTC - 5 always. (Treating them as Toronto local time shifts every
+    summer hour by one.)"""
     out = []
-    tz = ZoneInfo("America/Toronto")
-    utc = ZoneInfo("UTC")
-
     for y in years:
         try:
-            df = pd.read_csv(
-                f"https://reports-public.ieso.ca/public/Demand/PUB_Demand_{y}.csv",
-                skiprows=3
-            ).dropna(subset=["Ontario Demand"])
+            df = pd.read_csv(f"https://reports-public.ieso.ca/public/Demand/PUB_Demand_{y}.csv",
+                             skiprows=3).dropna(subset=["Ontario Demand"])
         except Exception as e:
             print(f"IESO {y}: {e}")
             continue
-
-        local = pd.to_datetime(
-            df["Date"].astype(str)
-            + " "
-            + (df["Hour"].astype(int) - 1).astype(str)
-            + ":00"
-        )
-
-        utc_values = []
-        seen = {}
-
-        for ts in local:
-            key = ts.to_pydatetime()
-
-            # Handle the repeated 01:00 during the fall DST transition.
-            fold = min(seen.get(key, 0), 1)
-            seen[key] = seen.get(key, 0) + 1
-
-            aware = key.replace(
-                tzinfo=tz,
-                fold=fold
-            )
-
-            utc_values.append(
-                aware.astimezone(utc).replace(tzinfo=None)
-            )
-
-        out.append(
-            pd.Series(
-                df["Ontario Demand"].astype(float).values,
-                index=pd.DatetimeIndex(utc_values)
-            )
-        )
-
+        est = pd.to_datetime(df["Date"].astype(str)) + pd.to_timedelta(df["Hour"].astype(int) - 1, unit="h")
+        out.append(pd.Series(df["Ontario Demand"].astype(float).values,
+                             index=pd.DatetimeIndex(est + pd.DateOffset(hours=5))))
     return pd.concat(out).groupby(level=0).last().sort_index()
 
+
 def fetch_live_demand():
-    """Fetch the latest Ontario 5-minute demand from IESO."""
-    from xml.etree import ElementTree
-
-    url = (
-        "https://reports-public.ieso.ca/public/"
-        "RealtimeTotals/PUB_RealtimeTotals.xml"
-    )
-
-    r = requests.get(url, timeout=120)
+    """Latest Ontario 5-minute demand. Returns {'timestamp': naive EST, 'demand': MW}."""
+    r = requests.get("https://reports-public.ieso.ca/public/RealtimeTotals/PUB_RealtimeTotals.xml",
+                     timeout=60)
     r.raise_for_status()
-
     root = ElementTree.fromstring(r.content)
+    tag = lambda e: e.tag.split("}")[-1]
 
-    def find_text(name):
-        """Find an XML element by local name, ignoring namespaces."""
-        for elem in root.iter():
-            if elem.tag.split("}")[-1] == name:
-                return elem.text
-        return None
+    def first(name):
+        return next(e.text for e in root.iter() if tag(e) == name)
 
-    delivery_date = find_text("DeliveryDate")
-    delivery_hour = int(find_text("DeliveryHour"))
-
-    # IESO hour 1 = 00:00-01:00, hour 2 = 01:00-02:00, etc.
-    base = (
-        pd.Timestamp(delivery_date)
-        + pd.Timedelta(hours=delivery_hour - 1)
-    )
-
+    base = pd.Timestamp(first("DeliveryDate")) + pd.DateOffset(hours=int(first("DeliveryHour")) - 1)
     rows = []
-
-    # Find every 5-minute interval.
-    for interval_energy in root.iter():
-        if interval_energy.tag.split("}")[-1] != "IntervalEnergy":
+    for ie in root.iter():
+        if tag(ie) != "IntervalEnergy":
             continue
-
-        interval = None
-        ontario_demand = None
-
-        for child in interval_energy.iter():
-            name = child.tag.split("}")[-1]
-
-            if name == "Interval":
-                interval = int(child.text)
-
-            elif name == "MarketQuantity":
-                quantity_name = child.text
-
-                if quantity_name == "ONTARIO DEMAND":
-                    # EnergyMW is inside the same MQ element.
-                    for sibling in interval_energy.iter():
-                        if sibling.tag.split("}")[-1] == "MQ":
-                            # handled below
-                            pass
-
-            elif name == "EnergyMW":
-                # We'll associate this with the MQ by parsing below.
-                pass
-
-        # Parse MQ records directly.
-        for mq in interval_energy.iter():
-            if mq.tag.split("}")[-1] != "MQ":
-                continue
-
-            quantity_name = None
-            energy_mw = None
-
-            for child in mq:
-                name = child.tag.split("}")[-1]
-
-                if name == "MarketQuantity":
-                    quantity_name = child.text
-                elif name == "EnergyMW":
-                    energy_mw = child.text
-
-            if quantity_name == "ONTARIO DEMAND":
-                ontario_demand = float(energy_mw)
-                break
-
-        if interval is not None and ontario_demand is not None:
-            timestamp = base + pd.Timedelta(
-                minutes=(interval - 1) * 5
-            )
-
-            rows.append({
-                "timestamp": timestamp,
-                "demand": ontario_demand,
-            })
-
+        interval = next((int(c.text) for c in ie.iter() if tag(c) == "Interval"), None)
+        mw = None
+        for mq in ie.iter():
+            if tag(mq) == "MQ":
+                kids = {tag(k): k.text for k in mq}
+                if kids.get("MarketQuantity") == "ONTARIO DEMAND":
+                    mw = float(kids["EnergyMW"])
+        if interval is not None and mw is not None:
+            rows.append({"timestamp": base + pd.DateOffset(minutes=(interval - 1) * 5), "demand": mw})
     if not rows:
         raise RuntimeError("No Ontario demand intervals found in IESO report")
-
-    latest = rows[-1]
-
-    return latest
+    return rows[-1]
 
 
 def make_features(w, dem):
@@ -263,15 +164,19 @@ def make_features(w, dem):
     f["temp_roll24"] = f["temp"].rolling(24).mean()
     f["temp_roll72"] = f["temp"].rolling(72).mean()
     f["dtemp3"] = f["temp"] - f["temp_lag3"]
+    f["dtemp168"] = f["temp"] - f["temp"].shift(168)
 
-    d = dem.reindex(f.index)                      # past demand, aligned to the weather clock
-    for k in LAGS:
-        f[f"dem_lag{k}"] = d.shift(k)
-    f["dem_roll24"] = d.shift(HORIZON).rolling(24).mean()
-    f["dem_trend"] = f[f"dem_lag{HORIZON}"] - f[f"dem_lag{HORIZON + 1}"]
-    f["demand"] = d
+    # Demand lags are computed on the full demand history (not just the weather window),
+    # so 1- and 2-week lags exist for every forecast hour.
+    d = dem.reindex(pd.date_range(min(dem.index.min(), f.index.min()), f.index.max(), freq="h"))
+    for k in sorted(set(NOW_LAGS) | {336}):
+        f[f"dem_lag{k}"] = d.shift(k).reindex(f.index)
+    f["dem_roll24"] = d.shift(1).rolling(24).mean().reindex(f.index)
+    f["dem_trend"] = f["dem_lag1"] - f["dem_lag2"]
+    f["dem_wk_mean"] = d.shift(168).rolling(168).mean().reindex(f.index)
+    f["demand"] = d.reindex(f.index)
 
-    loc = f.index.tz_localize("UTC").tz_convert("America/Toronto")
+    loc = f.index.tz_localize("UTC").tz_convert(TORONTO)
     f["hour"], f["dow"] = loc.hour, loc.dayofweek
     f["month"], f["doy"] = loc.month, loc.dayofyear
     day = pd.DatetimeIndex(loc.tz_localize(None).normalize())
@@ -283,6 +188,10 @@ def make_features(w, dem):
     return f
 
 
-def predict_demand(model, X):
-    """The model predicts the change from the newest known demand value."""
-    return X[f"dem_lag{HORIZON}"] + model.predict(X[FEATURES])
+def predict_now(model, X):
+    """Both models predict the change from a known past demand value."""
+    return X["dem_lag1"] + model.predict(X[NOW_FEATURES])
+
+
+def predict_week(model, X):
+    return X["dem_lag168"] + model.predict(X[WEEK_FEATURES])
