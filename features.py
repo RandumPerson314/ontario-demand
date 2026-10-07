@@ -104,19 +104,154 @@ def fetch_live():
 
 
 def fetch_demand(years):
-    """IESO hourly Ontario demand as a Series indexed by UTC hour start."""
+    """IESO hourly Ontario demand, indexed by naive UTC hour."""
+    from zoneinfo import ZoneInfo
+
     out = []
+    tz = ZoneInfo("America/Toronto")
+    utc = ZoneInfo("UTC")
+
     for y in years:
         try:
-            df = pd.read_csv(f"https://reports-public.ieso.ca/public/Demand/PUB_Demand_{y}.csv",
-                             skiprows=3).dropna(subset=["Ontario Demand"])
+            df = pd.read_csv(
+                f"https://reports-public.ieso.ca/public/Demand/PUB_Demand_{y}.csv",
+                skiprows=3
+            ).dropna(subset=["Ontario Demand"])
         except Exception as e:
             print(f"IESO {y}: {e}")
             continue
-        est = pd.to_datetime(df["Date"]) + pd.to_timedelta(df["Hour"] - 1, unit="h")
-        out.append(pd.Series(df["Ontario Demand"].astype(float).values,
-                             index=est + pd.DateOffset(hours=5)))
+
+        local = pd.to_datetime(
+            df["Date"].astype(str)
+            + " "
+            + (df["Hour"].astype(int) - 1).astype(str)
+            + ":00"
+        )
+
+        utc_values = []
+        seen = {}
+
+        for ts in local:
+            key = ts.to_pydatetime()
+
+            # Handle the repeated 01:00 during the fall DST transition.
+            fold = min(seen.get(key, 0), 1)
+            seen[key] = seen.get(key, 0) + 1
+
+            aware = key.replace(
+                tzinfo=tz,
+                fold=fold
+            )
+
+            utc_values.append(
+                aware.astimezone(utc).replace(tzinfo=None)
+            )
+
+        out.append(
+            pd.Series(
+                df["Ontario Demand"].astype(float).values,
+                index=pd.DatetimeIndex(utc_values)
+            )
+        )
+
     return pd.concat(out).groupby(level=0).last().sort_index()
+
+def fetch_live_demand():
+    """Fetch the latest Ontario 5-minute demand from IESO."""
+    from xml.etree import ElementTree
+
+    url = (
+        "https://reports-public.ieso.ca/public/"
+        "RealtimeTotals/PUB_RealtimeTotals.xml"
+    )
+
+    r = requests.get(url, timeout=120)
+    r.raise_for_status()
+
+    root = ElementTree.fromstring(r.content)
+
+    def find_text(name):
+        """Find an XML element by local name, ignoring namespaces."""
+        for elem in root.iter():
+            if elem.tag.split("}")[-1] == name:
+                return elem.text
+        return None
+
+    delivery_date = find_text("DeliveryDate")
+    delivery_hour = int(find_text("DeliveryHour"))
+
+    # IESO hour 1 = 00:00-01:00, hour 2 = 01:00-02:00, etc.
+    base = (
+        pd.Timestamp(delivery_date)
+        + pd.Timedelta(hours=delivery_hour - 1)
+    )
+
+    rows = []
+
+    # Find every 5-minute interval.
+    for interval_energy in root.iter():
+        if interval_energy.tag.split("}")[-1] != "IntervalEnergy":
+            continue
+
+        interval = None
+        ontario_demand = None
+
+        for child in interval_energy.iter():
+            name = child.tag.split("}")[-1]
+
+            if name == "Interval":
+                interval = int(child.text)
+
+            elif name == "MarketQuantity":
+                quantity_name = child.text
+
+                if quantity_name == "ONTARIO DEMAND":
+                    # EnergyMW is inside the same MQ element.
+                    for sibling in interval_energy.iter():
+                        if sibling.tag.split("}")[-1] == "MQ":
+                            # handled below
+                            pass
+
+            elif name == "EnergyMW":
+                # We'll associate this with the MQ by parsing below.
+                pass
+
+        # Parse MQ records directly.
+        for mq in interval_energy.iter():
+            if mq.tag.split("}")[-1] != "MQ":
+                continue
+
+            quantity_name = None
+            energy_mw = None
+
+            for child in mq:
+                name = child.tag.split("}")[-1]
+
+                if name == "MarketQuantity":
+                    quantity_name = child.text
+                elif name == "EnergyMW":
+                    energy_mw = child.text
+
+            if quantity_name == "ONTARIO DEMAND":
+                ontario_demand = float(energy_mw)
+                break
+
+        if interval is not None and ontario_demand is not None:
+            timestamp = base + pd.Timedelta(
+                minutes=(interval - 1) * 5
+            )
+
+            rows.append({
+                "timestamp": timestamp,
+                "demand": ontario_demand,
+            })
+
+    if not rows:
+        raise RuntimeError("No Ontario demand intervals found in IESO report")
+
+    latest = rows[-1]
+
+    return latest
 
 
 def make_features(w, dem):
