@@ -1,160 +1,73 @@
 <!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Ontario electricity demand</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><script src="nav.js"></script>
+<title>Ontario electricity demand: welcome</title>
 <style>
 :root{--bg:#fff;--fg:#1d2733;--mut:#6b7785;--card:#f4f6f9;--ac:#d9480f;--bd:#dde2e8}
 @media(prefers-color-scheme:dark){:root{--bg:#14181d;--fg:#e6eaee;--mut:#8b96a3;--card:#1e242b;--bd:#313a44}}
-body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--fg)}
-main{max-width:1050px;margin:auto;padding:16px}h1{font-size:22px;margin:0 0 12px}h2{font-size:17px;margin:0 0 6px}h3{font-size:14px;margin:14px 0 4px}
-.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
-@media(max-width:800px){.cards{grid-template-columns:1fr 1fr}}@media(max-width:480px){.cards{grid-template-columns:1fr}}
-.card,.panel{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px}.panel{margin-bottom:14px}
-.card span{display:block;color:var(--mut);font-size:12px}.card b{font-size:23px}.card small{display:block;color:var(--mut);font-size:12px}
-canvas{width:100%;height:300px;display:block}canvas.sm{height:140px}
-p{color:var(--mut);font-size:13px;margin:4px 0}select{font-size:14px}
-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}td,th{padding:4px 6px;border-bottom:1px solid var(--bd);text-align:right;font-weight:400}
-th{color:var(--mut)}th:first-child,td:first-child{text-align:left}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}@media(max-width:800px){.grid{grid-template-columns:1fr 1fr}}@media(max-width:480px){.grid{grid-template-columns:1fr}}
-.ctl{display:grid;grid-template-columns:repeat(2,1fr);gap:0 18px}@media(max-width:600px){.ctl{grid-template-columns:1fr}}
-label{display:block;margin:7px 0 2px;font-size:13px}label b{float:right;font-weight:600}input[type=range],.ctl select{width:100%}
-.row{display:grid;grid-template-columns:110px 1fr 190px;gap:8px;align-items:center;margin:5px 0;font-size:12px}
-.bar{position:relative;height:16px;background:var(--bg);border-radius:3px}.bar i{position:absolute;top:0;height:100%;background:var(--ac);opacity:.85;border-radius:3px}
-.bar u{position:absolute;left:50%;top:-2px;height:20px;border-left:1px solid var(--fg)}
-button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:7px 12px;font-size:13px;font-weight:600;cursor:pointer;margin-top:8px}
+body{margin:0;font:16px/1.55 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:880px;margin:auto;padding:20px 16px 50px}h1{font-size:30px;margin:10px 0 6px}h2{font-size:21px;margin:30px 0 6px}h3{font-size:16px;margin:0 0 4px}
+p,li{color:var(--fg)}.lead{font-size:18px;color:var(--mut)}.mut{color:var(--mut);font-size:14px}
+.pages{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:14px 0}@media(max-width:640px){.pages{grid-template-columns:1fr}}
+a.tile{display:block;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;color:var(--fg);text-decoration:none}
+a.tile:hover{border-color:var(--ac)}a.tile p{margin:4px 0 0;color:var(--mut);font-size:14px}
+.box{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px 16px;margin:12px 0}
+dt{font-weight:700;margin-top:10px}dd{margin:2px 0 0;color:var(--mut)}code{background:var(--card);padding:1px 5px;border-radius:5px;font-size:14px}
+li{margin:5px 0}
 </style></head><body><main>
 <h1>Ontario electricity demand</h1>
-<div class="cards">
-<div class="card"><span>Predicted demand now</span><b id="p">-</b><small id="pt"></small></div>
-<div class="card"><span>Live demand (IESO, 5-min)</span><b id="l">-</b><small id="lt"></small></div>
-<div class="card"><span>Latest hourly actual</span><b id="a">-</b><small id="at"></small></div>
-<div class="card"><span>Accuracy (last 7 days)</span><b id="m">-</b><small id="mt"></small></div></div>
+<p class="lead">Live predictions of how much electricity Ontario will use, checked against the real numbers from the IESO (the province's grid operator) every hour.</p>
 
-<div class="panel"><h2>7-day forecast</h2>
-<canvas id="cf"></canvas>
-<p>Click the graph to choose an hour to explain in the explorer below (dashed line). All times are Toronto time.</p>
-<div id="days"></div></div>
+<h2>Where to go</h2>
+<div class="pages">
+<a class="tile" href="dashboard.html"><h3>Gradient boosting dashboard</h3><p>The main page. Predictions for this hour and next hour, the real demand, a 7-day forecast, and an explorer showing what drives demand.</p></a>
+<a class="tile" href="polynomial.html"><h3>Polynomial model</h3><p>A simpler model that is one written-out formula. Move sliders, read the full equation, or predict right now from live weather.</p></a>
+<a class="tile" href="compare.html"><h3>Comparison</h3><p>Which model is more accurate? Error scores for next-hour and 7-day forecasts, from history and from live results.</p></a>
+<div class="tile" style="cursor:default"><h3>This page</h3><p>A short guide to reading everything on the site.</p></div></div>
 
-<div class="panel"><h2>Past hours: prediction vs actual</h2>
-<label style="display:block;margin:0 0 4px">Show <select id="rng"><option value="24">last 24 hours</option><option value="72">last 3 days</option>
-<option value="168" selected>last 7 days</option><option value="720">last 30 days</option></select></label>
-<canvas id="c"></canvas><p id="msg"></p>
-<p>Orange = hourly model (uses the previous hour's demand), dark = actual IESO demand. Solid dots were predicted live; hollow dots were filled in afterwards.</p></div>
+<h2>The quick tour</h2>
+<ol>
+<li><b>Start on the dashboard.</b> The two boxes at the top show the predicted demand for the current hour and the next hour, in megawatts (MW). Next to them is the actual demand so far this hour, so you can see how close the prediction is.</li>
+<li><b>Scroll to the 7-day forecast.</b> The line is the predicted demand hour by hour, and the table below lists each day's peak and low.</li>
+<li><b>Click anywhere on the forecast line.</b> That picks an hour to explain. Further down, the explorer shows which factors push demand up or down at that hour.</li>
+<li><b>Try the sliders.</b> Make it 10° warmer, cut the cloud cover, or turn the day into a holiday, and watch the prediction change instantly.</li>
+<li><b>Visit Comparison</b> to see how the two models stack up.</li>
+</ol>
 
-<div class="panel"><h2>What drives the forecast?</h2>
-<p id="exTitle">Loading...</p>
-<p>This explains the 7-day model (weather, calendar, and demand from a week or two earlier). It runs in your browser, so move any slider and the prediction updates.</p>
-<div class="ctl" id="ctl"></div><button onclick="resetSc();drawEx()">Reset to the forecast</button>
-<h3>Which factors move demand most?</h3>
-<p>Each bar spans the lowest to highest demand as that factor sweeps its whole range, with everything else as set above.</p>
-<div id="tor"></div>
-<h3>Prediction across each factor</h3>
-<label style="display:block"><input type="checkbox" id="shy" checked onchange="drawEx()"> Same y-axis for all graphs</label>
-<div class="grid" id="pd"></div></div>
+<h2>Reading the dashboard</h2>
+<dl>
+<dt>This hour / Next hour</dt><dd>Predictions for the hour on the clock now and the one after it. Times are Toronto time and each hour is labelled by when it starts, so "15:00" means 3:00 to 4:00 pm. The small grey text says which model made the number.</dd>
+<dt>Actual demand this hour (so far)</dt><dd>The average of the grid operator's 5-minute readings since the hour began, so it is a like-for-like comparison with an hourly prediction. Early in the hour it is based on only a few readings and can still move. The percentage shows how far the prediction is from it.</dd>
+<dt>Last completed hour</dt><dd>The most recent full hour the IESO has published. It is usually the previous hour, but the IESO can take a little while to post it.</dd>
+<dt>Accuracy</dt><dd>The typical size of the this-hour model's miss over the last 7 days (mean absolute error, in MW, and as a percentage of demand).</dd>
+<dt>Prediction vs actual graph</dt><dd>Orange is what the model predicted, dark is what really happened. Solid dots were predicted before the hour began; hollow dots were calculated afterwards from past data, so they are a little less honest as a test.</dd>
+</dl>
 
-<script src="demand_log.js"></script><script src="forecast.js"></script><script src="week_model.js"></script>
-<script>
-const $=id=>document.getElementById(id),css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const MW=v=>Math.round(v).toLocaleString()+" MW",DOW=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"],
-MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],lab=t=>t.replace("T"," ");
-function setup(c){const r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=r.width*d;c.height=r.height*d;const g=c.getContext("2d");g.scale(d,d);return[g,r.width,r.height]}
-function plot(c,xs,S,o={}){
- const[g,w,h]=setup(c),Lm=54,R=10,T=8,Bt=26,all=S.flatMap(s=>s.ys).filter(v=>v!=null);
- let lo=o.yr?o.yr[0]:Math.min(...all),hi=o.yr?o.yr[1]:Math.max(...all);const p=(hi-lo)*.08||1;lo-=p;hi+=p;
- const x0=xs[0],x1=xs[xs.length-1],X=x=>Lm+(x-x0)/((x1-x0)||1)*(w-Lm-R),Y=y=>T+(hi-y)/(hi-lo)*(h-T-Bt);
- g.font="11px system-ui";g.lineWidth=1;g.fillStyle=css("--mut");g.strokeStyle=css("--bd");
- for(let i=0;i<=4;i++){const y=lo+(hi-lo)*i/4;g.beginPath();g.moveTo(Lm,Y(y));g.lineTo(w-R,Y(y));g.stroke();g.fillText(Math.round(y).toLocaleString(),2,Y(y)+4)}
- const nt=o.nt||5;for(let i=0;i<nt;i++){const j=Math.round((xs.length-1)*i/(nt-1));g.fillText(o.xf(xs[j],j),Math.min(X(xs[j])-12,w-34),h-8)}
- S.forEach(s=>{g.strokeStyle=s.color;g.lineWidth=2;g.beginPath();let pen=false;
-  xs.forEach((x,i)=>{const v=s.ys[i];if(v==null){pen=false;return}pen?g.lineTo(X(x),Y(v)):g.moveTo(X(x),Y(v));pen=true});g.stroke();
-  if(s.dots)xs.forEach((x,i)=>{const v=s.ys[i];if(v==null)return;g.beginPath();g.arc(X(x),Y(v),3,0,7);
-   if(s.hollow&&s.hollow[i]){g.lineWidth=1.5;g.stroke()}else{g.fillStyle=s.color;g.fill()}})});
- if(o.mark!=null){g.strokeStyle=css("--fg");g.lineWidth=1.5;g.setLineDash([4,3]);g.beginPath();g.moveTo(X(o.mark),T);g.lineTo(X(o.mark),h-Bt);g.stroke();g.setLineDash([])}
- if(o.dot){g.fillStyle=css("--fg");g.beginPath();g.arc(X(o.dot[0]),Y(o.dot[1]),5,0,7);g.fill()}
- c._m={x0,x1,Lm,R,w}}
+<h2>Using the explorer</h2>
+<ul>
+<li><b>Which factors move demand most?</b> Each bar shows how far demand could swing as that one factor ranges over its whole range, with everything else held where the sliders are. Longer bar = bigger influence.</li>
+<li><b>Prediction across each factor.</b> One small graph per factor. The dot is where things are now; the curve shows what would happen elsewhere. Tick "same y-axis" to compare factors on equal terms, or untick it to see each curve's shape up close.</li>
+<li><b>The sliders.</b> Temperature change shifts the whole weather picture warmer or colder. The others set that factor directly. Press <i>Reset to the forecast</i> to go back to the real forecast for the hour you picked.</li>
+</ul>
 
-/* ---------- cards + past chart ---------- */
-function cards(){
- const L=window.LOG||[],M=window.LOG_META||{},F=window.FC,k=new Date().toISOString().slice(0,13)+":00",r=L.find(r=>r.u==k);
- if(r){$("p").textContent=MW(r.pred);$("pt").textContent=lab(r.t)+" Toronto · hourly model"}
- else if(F&&F.u.length){let i=F.u.indexOf(k);if(i<0)i=0;$("p").textContent=MW(F.pred[i]);$("pt").textContent=lab(F.t[i])+" Toronto · forecast model"}
- if(M.live_mw){$("l").textContent=MW(M.live_mw);$("lt").textContent=lab(M.live_t)+" Toronto"}
- const la=[...L].reverse().find(r=>r.actual!=null);
- if(la){$("a").textContent=MW(la.actual);$("at").textContent="hour starting "+lab(la.t)}
- const wk=L.slice(-168).filter(r=>r.actual!=null),live=wk.filter(r=>!r.bf),use=live.length>=12?live:wk;
- if(use.length){const e=use.map(r=>r.pred-r.actual),mae=e.reduce((s,x)=>s+Math.abs(x),0)/e.length;
-  $("m").textContent="±"+Math.round(mae)+" MW";
-  $("mt").textContent=use.length+(use===live?" live":" retrospective")+" hours, "+(100*e.reduce((s,x,i)=>s+Math.abs(x)/use[i].actual,0)/e.length).toFixed(2)+"% error"}}
-function drawLog(){
- const L=window.LOG||[];if(!L.length){$("msg").textContent="No data yet: the first update hasn't run.";return}
- const D=L.slice(-+$("rng").value);
- plot($("c"),D.map((_,i)=>i),[{ys:D.map(r=>r.actual),color:css("--fg")},{ys:D.map(r=>r.pred),color:css("--ac"),dots:D.length<=100,hollow:D.map(r=>r.bf)}],
-  {xf:(x,j)=>D[j].t.slice(5,13).replace("T"," ")+"h"});
- $("msg").textContent="Last update: "+(window.LOG_META?new Date(LOG_META.updated).toLocaleString():"-")}
+<h2>The two models in plain language</h2>
+<div class="box"><b>Polynomial.</b> One fixed mathematical formula that turns the weather and the calendar (hour, day of week, holidays, season) into a demand number. It never looks at recent demand. Everything it does is visible on its page, down to every coefficient.</div>
+<div class="box"><b>Gradient boosting.</b> A team of hundreds of small decision trees, each correcting the mistakes of the ones before it. It also uses demand from the last few hours and from the same hour a week earlier, which makes it very accurate for the next hour or two. For the 7-day forecast it can only use demand from at least a week back, since nothing newer is known yet.</div>
 
-/* ---------- 7-day forecast ---------- */
-let sel=0,Sc={};
-function drawFc(){
- const F=window.FC;if(!F||!F.u.length){$("days").textContent="Forecast not available yet.";return}
- plot($("cf"),F.u.map((_,i)=>i),[{ys:F.pred,color:css("--ac")}],{mark:sel,nt:8,
-  xf:(x,j)=>DOW[new Date(F.t[j].slice(0,10)+"T12:00:00").getDay()]+" "+F.t[j].slice(11,13)+"h"});
- const D={};F.t.forEach((t,i)=>(D[t.slice(0,10)]=D[t.slice(0,10)]||[]).push(i));
- $("days").innerHTML="<table><tr><th>Day</th><th>Peak</th><th>At</th><th>Lowest</th><th>Avg temp</th></tr>"+Object.entries(D).map(([d,ix])=>{
-  const pk=ix.reduce((a,i)=>F.pred[i]>F.pred[a]?i:a),mn=Math.min(...ix.map(i=>F.pred[i])),tp=ix.reduce((s,i)=>s+F.temp[i],0)/ix.length;
-  return`<tr><td>${DOW[new Date(d+"T12:00:00").getDay()]} ${d.slice(5)}${ix.length<24?" (partial)":""}</td><td>${MW(F.pred[pk])}</td><td>${F.t[pk].slice(11,13)}:00</td><td>${MW(mn)}</td><td>${tp.toFixed(1)} °C</td></tr>`}).join("")+"</table>"}
-$("cf").onclick=e=>{const c=e.target,m=c._m,F=window.FC;if(!m||!F)return;const r=c.getBoundingClientRect();
- sel=Math.max(0,Math.min(F.u.length-1,Math.round(m.x0+(e.clientX-r.left-m.Lm)/(m.w-m.Lm-m.R)*(m.x1-m.x0))));resetSc();drawFc();drawEx()};
+<h2>How accurate is it?</h2>
+<p>Expect the next-hour predictions to be off by roughly one to two percent, and the 7-day forecast to be somewhat worse because it depends on weather forecasts, which get less certain days ahead. The <a href="compare.html">Comparison</a> page has the exact scores. Odd days (holidays, storms, heat waves, outages) are the hardest to predict.</p>
 
-/* ---------- explorer: evaluates the exported trees in the browser ---------- */
-const FI={};if(window.WM)WM.features.forEach((n,i)=>FI[n]=i);
-const range=(a,b,n)=>[...Array(n)].map((_,i)=>a+(b-a)*i/(n-1));
-function model(x){let s=WM.base;for(const T of WM.trees){let n=0;while(T.f[n]>=0)n=x[T.f[n]]<=T.t[n]?T.l[n]:T.r[n];s+=T.v[n]}return x[FI.dem_lag168]+s}
-const dewp=(T,H)=>{const g=Math.log(Math.max(H,1)/100)+17.62*T/(243.12+T);return 243.12*g/(17.62-g)};
-function mod(x0,s){
- const x=x0.slice(),g=n=>x0[FI[n]],set=(n,v)=>{x[FI[n]]=v};
- for(const n of ["temp","feels","temp_lag1","temp_lag3","temp_lag24","temp_roll24","temp_roll72"])set(n,g(n)+s.dT);
- set("hdd",Math.max(18-x[FI.temp],0));set("cdd",Math.max(x[FI.temp]-18,0));set("dtemp168",g("dtemp168")+s.dT);
- set("humidity",s.humidity);set("wind",s.wind);set("cloud",s.cloud);set("precip",s.precip);set("snow",s.snow);
- set("solar",g("solar")*s.solar/100);
- set("dew",g("dew")+dewp(x[FI.temp],s.humidity)-dewp(g("temp"),g("humidity")));
- if(s.month!=g("month")){set("month",s.month);set("doy",(s.month-.5)*30.44)}
- if(s.day){const d={weekday:[2,0,0],saturday:[5,1,0],sunday:[6,1,0],holiday:[0,1,1]}[s.day];set("dow",d[0]);set("nonwork",d[1]);set("hol",d[2])}
- return x}
-const pred=(x0,s)=>model(mod(x0,s));
-const SLD=[["dT","Temperature change",-15,15,.5,v=>(v>0?"+":"")+v.toFixed(1)+" °C"],["humidity","Humidity",0,100,1,v=>Math.round(v)+"%"],
- ["wind","Wind",0,60,1,v=>Math.round(v)+" km/h"],["cloud","Cloud cover",0,100,1,v=>Math.round(v)+"%"],
- ["solar","Solar radiation",0,150,5,v=>Math.round(v)+"% of forecast"],["precip","Rain",0,10,.1,v=>v.toFixed(1)+" mm/h"],
- ["snow","Snowfall",0,5,.1,v=>v.toFixed(1)+" cm/h"],["month","Month",1,12,1,v=>MON[Math.round(v)-1]]];
-const FACT=[{k:"dT",n:"Temperature",v:range(-15,15,31),f:(v,x)=>(x[FI.temp]+v).toFixed(0)+"°C"},
- {k:"humidity",n:"Humidity",v:range(20,100,17),f:v=>Math.round(v)+"%"},{k:"wind",n:"Wind",v:range(0,40,17),f:v=>Math.round(v)+" km/h"},
- {k:"cloud",n:"Cloud cover",v:range(0,100,11),f:v=>Math.round(v)+"%"},{k:"solar",n:"Solar radiation",v:range(0,150,16),f:v=>Math.round(v)+"%"},
- {k:"precip",n:"Rain",v:range(0,5,11),f:v=>v.toFixed(1)+" mm/h"},{k:"snow",n:"Snowfall",v:range(0,2,11),f:v=>v.toFixed(1)+" cm/h"},
- {k:"month",n:"Season (month)",v:range(1,12,12),f:v=>MON[Math.round(v)-1]},
- {k:"day",n:"Day type",v:["weekday","saturday","sunday","holiday"],f:v=>v}];
-const IN={},LB={};
-function buildCtl(){const box=$("ctl");SLD.forEach(([k,n,lo,hi,st,fmt])=>{const l=document.createElement("label");l.innerHTML=n+"<b></b>";
-  const i=document.createElement("input");i.type="range";i.min=lo;i.max=hi;i.step=st;i.oninput=()=>{Sc[k]=+i.value;drawEx()};
-  l.appendChild(i);box.appendChild(l);IN[k]=i;LB[k]=[l.querySelector("b"),fmt]});
- const l=document.createElement("label");l.innerHTML='Day type<select id="dayType"><option value="">as forecast</option><option>weekday</option><option>saturday</option><option>sunday</option><option>holiday</option></select>';
- box.appendChild(l);l.querySelector("select").onchange=e=>{Sc.day=e.target.value||null;drawEx()};
- const d=$("pd");FACT.filter(f=>f.k!="day").forEach(f=>{const q=document.createElement("div");q.innerHTML=`<p style="margin:0"><b>${f.n}</b></p><canvas class="sm"></canvas>`;d.appendChild(q);f.c=q.querySelector("canvas")})}
-function resetSc(){const x=FC.X[sel],g=n=>x[FI[n]];Sc={dT:0,humidity:g("humidity"),wind:g("wind"),cloud:g("cloud"),solar:100,precip:g("precip"),snow:g("snow"),month:g("month"),day:null};
- if($("dayType"))$("dayType").value=""}
-function drawEx(){
- if(!window.FC||!window.WM||!FC.u.length){$("exTitle").textContent="Waiting for forecast and model data.";return}
- const x0=FC.X[sel],base=pred(x0,Sc);
- SLD.forEach(([k,,,,,fmt])=>{IN[k].value=Sc[k];LB[k][0].textContent=fmt(Sc[k])});
- $("exTitle").innerHTML=`<b>${lab(FC.t[sel])}</b> Toronto time: forecast ${MW(FC.pred[sel])}; with your settings <b>${MW(base)}</b>`;
- const R=FACT.map(f=>({f,ys:f.v.map(v=>pred(x0,{...Sc,[f.k]:v}))}));
- const T=R.map(r=>{const lo=Math.min(...r.ys),hi=Math.max(...r.ys);return{f:r.f,lo,hi,vl:r.f.v[r.ys.indexOf(lo)],vh:r.f.v[r.ys.indexOf(hi)]}}).sort((a,b)=>(b.hi-b.lo)-(a.hi-a.lo));
- const sc=Math.max(...T.map(t=>Math.max(Math.abs(t.lo-base),Math.abs(t.hi-base))))||1,sg=d=>(d>0?"+":"")+Math.round(d);
- $("tor").innerHTML=T.map(t=>`<div class=row><span>${t.f.n}</span><div class=bar><u></u><i style="left:${50+(t.lo-base)/sc*50}%;width:${(t.hi-t.lo)/sc*50}%"></i></div>
-  <span>${t.f.f(t.vl,x0)}: ${sg(t.lo-base)} MW<br>${t.f.f(t.vh,x0)}: ${sg(t.hi-base)} MW</span></div>`).join("");
- const pr=R.filter(r=>r.f.k!="day"),all=pr.flatMap(r=>r.ys),yr=$("shy").checked?[Math.min(...all),Math.max(...all)]:null;
- pr.forEach(r=>{const f=r.f,t0=x0[FI.temp],xs=f.k=="dT"?f.v.map(v=>t0+v):f.v,cur=f.k=="dT"?t0+Sc.dT:Sc[f.k];
-  plot(f.c,xs,[{ys:r.ys,color:css("--ac")}],{yr,dot:[cur,base],nt:4,xf:v=>f.k=="dT"?v.toFixed(0)+"°":f.k=="month"?MON[Math.round(v)-1]:String(f.f(v,x0)).replace(/ .*/,"")})})}
+<h2>Where the numbers come from</h2>
+<ul>
+<li><b>Demand:</b> the IESO's public reports (hourly history and 5-minute live readings).</li>
+<li><b>Weather:</b> Open-Meteo, averaged over seven Ontario cities weighted roughly by population.</li>
+<li><b>Updates:</b> an automatic job runs twice an hour and publishes new numbers. These pages reload their data every 5 minutes on their own, so you can leave them open.</li>
+</ul>
 
-function render(){if(window.FC&&window.WM&&FC.u.length&&!IN.dT){buildCtl();resetSc()}cards();drawFc();drawLog();drawEx()}
-function reload(){let n=2;for(const f of["demand_log.js","forecast.js"]){const s=document.createElement("script");s.src=f+"?"+Date.now();
- s.onload=s.onerror=()=>{s.remove();if(!--n){if(window.FC&&window.WM){sel=Math.min(sel,FC.u.length-1)}render()}};document.head.appendChild(s)}}
-$("rng").onchange=drawLog;addEventListener("resize",render);setInterval(reload,300000);
-render();
-</script></main></body></html>
+<h2>If something looks wrong</h2>
+<dl>
+<dt>A box shows "-" or the page says "No data yet"</dt><dd>The first automatic update hasn't run, or the data files haven't been published yet.</dd>
+<dt>The "this hour" prediction is missing</dt><dd>The model needs the previous hour's demand, which the IESO hasn't posted yet. The box falls back to another model and says so; the proper number appears within a few minutes.</dd>
+<dt>Times look an hour off</dt><dd>Everything is shown in Toronto time, including during daylight saving. The IESO itself reports in standard time all year, and the site converts for you.</dd>
+</dl>
+<p class="mut">This is an independent hobby project and is not affiliated with the IESO. Predictions are estimates and shouldn't be used for trading or operational decisions.</p>
+</main></body></html>

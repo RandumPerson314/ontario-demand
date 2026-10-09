@@ -24,5 +24,5 @@ jobs:
         run: |
           git config user.name "demand-bot"
           git config user.email "demand-bot@users.noreply.github.com"
-          git add docs/demand_log.js docs/demand_log.json docs/forecast.js
+          git add docs/demand_log.js docs/demand_log.json docs/forecast.js docs/forecast_archive.js
           git diff --cached --quiet || (git commit -m "update demand log" && git pull --rebase && git push)

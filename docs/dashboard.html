@@ -1,0 +1,150 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><script src="nav.js"></script><title>Gradient boosting dashboard</title>
+<style>
+:root{--bg:#fff;--fg:#1d2733;--mut:#6b7785;--card:#f4f6f9;--ac:#d9480f;--bd:#dde2e8}
+@media(prefers-color-scheme:dark){:root{--bg:#14181d;--fg:#e6eaee;--mut:#8b96a3;--card:#1e242b;--bd:#313a44}}
+body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+main{max-width:1050px;margin:auto;padding:16px}h1{font-size:22px;margin:0 0 12px}h2{font-size:17px;margin:0 0 6px}h3{font-size:14px;margin:14px 0 4px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:10px;margin-bottom:12px}
+.card,.panel{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px}.panel{margin-bottom:14px}
+.card span{display:block;color:var(--mut);font-size:12px}.card b{font-size:23px}.card small{display:block;color:var(--mut);font-size:12px}
+canvas{width:100%;height:300px;display:block}canvas.sm{height:140px}
+p{color:var(--mut);font-size:13px;margin:4px 0}select{font-size:14px}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}td,th{padding:4px 6px;border-bottom:1px solid var(--bd);text-align:right;font-weight:400}
+th{color:var(--mut)}th:first-child,td:first-child{text-align:left}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}@media(max-width:800px){.grid{grid-template-columns:1fr 1fr}}@media(max-width:480px){.grid{grid-template-columns:1fr}}
+.ctl{display:grid;grid-template-columns:repeat(2,1fr);gap:0 18px}@media(max-width:600px){.ctl{grid-template-columns:1fr}}
+label{display:block;margin:7px 0 2px;font-size:13px}label b{float:right;font-weight:600}input[type=range],.ctl select{width:100%}
+.row{display:grid;grid-template-columns:110px 1fr 190px;gap:8px;align-items:center;margin:5px 0;font-size:12px}
+.bar{position:relative;height:16px;background:var(--bg);border-radius:3px}.bar i{position:absolute;top:0;height:100%;background:var(--ac);opacity:.85;border-radius:3px}
+.bar u{position:absolute;left:50%;top:-2px;height:20px;border-left:1px solid var(--fg)}
+button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:7px 12px;font-size:13px;font-weight:600;cursor:pointer;margin-top:8px}
+</style></head><body><main>
+<h1>Gradient boosting dashboard</h1>
+<div class="cards">
+<div class="card"><span>This hour: prediction</span><b id="p">-</b><small id="pt"></small></div>
+<div class="card"><span>Next hour: prediction</span><b id="n">-</b><small id="nt"></small></div>
+<div class="card"><span>Actual demand this hour (so far)</span><b id="l">-</b><small id="lt"></small></div>
+<div class="card"><span>Last completed hour (IESO)</span><b id="a">-</b><small id="at"></small></div>
+<div class="card"><span>Accuracy (last 7 days)</span><b id="m">-</b><small id="mt"></small></div></div>
+
+<div class="panel"><h2>7-day forecast</h2>
+<canvas id="cf"></canvas>
+<p>Click the graph to choose an hour to explain in the explorer below (dashed line). All times are Toronto time.</p>
+<div id="days"></div></div>
+
+<div class="panel"><h2>Past hours: prediction vs actual</h2>
+<label style="display:block;margin:0 0 4px">Show <select id="rng"><option value="24">last 24 hours</option><option value="72">last 3 days</option>
+<option value="168" selected>last 7 days</option><option value="720">last 30 days</option></select></label>
+<canvas id="c"></canvas><p id="msg"></p>
+<p>Orange = the this-hour model (it uses the previous hour's demand), dark = actual IESO demand. Solid dots were predicted live, before the hour started; hollow dots were filled in afterwards.</p></div>
+
+<div class="panel"><h2>What drives the forecast?</h2>
+<p id="exTitle">Loading...</p>
+<p>This explains the 7-day model (weather, calendar, and demand from a week or two earlier). It runs in your browser, so move any slider and the prediction updates.</p>
+<div class="ctl" id="ctl"></div><button onclick="resetSc();drawEx()">Reset to the forecast</button>
+<h3>Which factors move demand most?</h3>
+<p>Each bar spans the lowest to highest demand as that factor sweeps its whole range, with everything else as set above.</p>
+<div id="tor"></div>
+<h3>Prediction across each factor</h3>
+<label style="display:block"><input type="checkbox" id="shy" checked onchange="drawEx()"> Same y-axis for all graphs</label>
+<div class="grid" id="pd"></div></div>
+
+<script src="demand_log.js"></script><script src="forecast.js"></script><script src="week_model.js"></script>
+<script src="common.js"></script>
+<script>
+/* ---------- cards + past chart ---------- */
+function cards(){
+ const L=window.LOG||[],M=window.LOG_META||{},F=window.FC,H=36e5,t0=Math.floor(Date.now()/H)*H;
+ const key=ms=>new Date(ms).toISOString().slice(0,13)+":00",
+ tl=ms=>new Date(ms).toLocaleString("sv-SE",{timeZone:"America/Toronto"}).slice(0,13)+":00";
+ const fcAt=k=>{const i=F?F.u.indexOf(k):-1;return i<0?null:F.pred[i]};
+ const pick=(k,fields)=>{const r=L.find(r=>r.u==k);if(r)for(const[f,s]of fields)if(r[f]!=null)return[r[f],s];
+  const v=fcAt(k);return v==null?[null,""]:[v,"7-day model"]};
+ const show=(b,t,v,s,ms)=>{$(b).textContent=v==null?"-":MW(v);$(t).textContent=tl(ms).slice(5)+" Toronto time"+(v==null?"":" · "+s)};
+ const[a,as]=pick(key(t0),[["pred","hourly model"],["pn","next-hour model"]]),[b,bs]=pick(key(t0+H),[["pn","next-hour model"]]);
+ show("p","pt",a,as,t0);show("n","nt",b,bs,t0+H);
+ if(M.live_mw!=null){$("l").textContent=MW(M.live_mw);
+  $("lt").textContent=lab(M.live_t).slice(5)+" hour · average of "+M.live_n+" readings (latest "+M.live_last+")"+
+   (a!=null&&lab(M.live_t)==tl(t0)?" · prediction is "+((100*(a/M.live_mw-1)).toFixed(1)).replace(/^(\d)/,"+$1")+"%":"")}
+ const la=[...L].reverse().find(r=>r.actual!=null);
+ if(la){$("a").textContent=MW(la.actual);$("at").textContent=lab(la.t).slice(5)+" Toronto time"}
+ const wk=L.slice(-168).filter(r=>r.actual!=null&&r.pred!=null),live=wk.filter(r=>!r.bf),use=live.length>=12?live:wk;
+ if(use.length){const e=use.map(r=>r.pred-r.actual),mae=e.reduce((s,x)=>s+Math.abs(x),0)/e.length;
+  $("m").textContent="±"+Math.round(mae)+" MW";
+  $("mt").textContent="this-hour model, "+use.length+(use===live?" live":" retrospective")+" hours, "+(100*e.reduce((s,x,i)=>s+Math.abs(x)/use[i].actual,0)/e.length).toFixed(2)+"% error"}}
+function drawLog(){
+ const L=window.LOG||[];if(!L.length){$("msg").textContent="No data yet: the first update hasn't run.";return}
+ const D=L.slice(-+$("rng").value);
+ plot($("c"),D.map((_,i)=>i),[{ys:D.map(r=>r.actual),color:css("--fg")},{ys:D.map(r=>r.pred),color:css("--ac"),dots:D.length<=100,hollow:D.map(r=>r.bf)}],
+  {xf:(x,j)=>D[j].t.slice(5,13).replace("T"," ")+"h"});
+ $("msg").textContent="Last update: "+(window.LOG_META?new Date(LOG_META.updated).toLocaleString():"-")}
+
+/* ---------- 7-day forecast ---------- */
+let sel=0,Sc={};
+function drawFc(){
+ const F=window.FC;if(!F||!F.u.length){$("days").textContent="Forecast not available yet.";return}
+ plot($("cf"),F.u.map((_,i)=>i),[{ys:F.pred,color:css("--ac")}],{mark:sel,nt:8,
+  xf:(x,j)=>DOW[new Date(F.t[j].slice(0,10)+"T12:00:00").getDay()]+" "+F.t[j].slice(11,13)+"h"});
+ const D={};F.t.forEach((t,i)=>(D[t.slice(0,10)]=D[t.slice(0,10)]||[]).push(i));
+ $("days").innerHTML="<table><tr><th>Day</th><th>Peak</th><th>At</th><th>Lowest</th><th>Avg temp</th></tr>"+Object.entries(D).map(([d,ix])=>{
+  const pk=ix.reduce((a,i)=>F.pred[i]>F.pred[a]?i:a),mn=Math.min(...ix.map(i=>F.pred[i])),tp=ix.reduce((s,i)=>s+F.temp[i],0)/ix.length;
+  return`<tr><td>${DOW[new Date(d+"T12:00:00").getDay()]} ${d.slice(5)}${ix.length<24?" (partial)":""}</td><td>${MW(F.pred[pk])}</td><td>${F.t[pk].slice(11,13)}:00</td><td>${MW(mn)}</td><td>${tp.toFixed(1)} °C</td></tr>`}).join("")+"</table>"}
+$("cf").onclick=e=>{const c=e.target,m=c._m,F=window.FC;if(!m||!F)return;const r=c.getBoundingClientRect();
+ sel=Math.max(0,Math.min(F.u.length-1,Math.round(m.x0+(e.clientX-r.left-m.Lm)/(m.w-m.Lm-m.R)*(m.x1-m.x0))));resetSc();drawFc();drawEx()};
+
+/* ---------- explorer: evaluates the exported trees in the browser ---------- */
+const FI={};if(window.WM)WM.features.forEach((n,i)=>FI[n]=i);
+const range=(a,b,n)=>[...Array(n)].map((_,i)=>a+(b-a)*i/(n-1));
+function model(x){let s=WM.base;for(const T of WM.trees){let n=0;while(T.f[n]>=0)n=x[T.f[n]]<=T.t[n]?T.l[n]:T.r[n];s+=T.v[n]}return x[FI.dem_lag168]+s}
+const dewp=(T,H)=>{const g=Math.log(Math.max(H,1)/100)+17.62*T/(243.12+T);return 243.12*g/(17.62-g)};
+function mod(x0,s){
+ const x=x0.slice(),g=n=>x0[FI[n]],set=(n,v)=>{x[FI[n]]=v};
+ for(const n of ["temp","feels","temp_lag1","temp_lag3","temp_lag24","temp_roll24","temp_roll72"])set(n,g(n)+s.dT);
+ set("hdd",Math.max(18-x[FI.temp],0));set("cdd",Math.max(x[FI.temp]-18,0));set("dtemp168",g("dtemp168")+s.dT);
+ set("humidity",s.humidity);set("wind",s.wind);set("cloud",s.cloud);set("precip",s.precip);set("snow",s.snow);
+ set("solar",g("solar")*s.solar/100);
+ set("dew",g("dew")+dewp(x[FI.temp],s.humidity)-dewp(g("temp"),g("humidity")));
+ if(s.month!=g("month")){set("month",s.month);set("doy",(s.month-.5)*30.44)}
+ if(s.day){const d={weekday:[2,0,0],saturday:[5,1,0],sunday:[6,1,0],holiday:[0,1,1]}[s.day];set("dow",d[0]);set("nonwork",d[1]);set("hol",d[2])}
+ return x}
+const pred=(x0,s)=>model(mod(x0,s));
+const SLD=[["dT","Temperature change",-15,15,.5,v=>(v>0?"+":"")+v.toFixed(1)+" °C"],["humidity","Humidity",0,100,1,v=>Math.round(v)+"%"],
+ ["wind","Wind",0,60,1,v=>Math.round(v)+" km/h"],["cloud","Cloud cover",0,100,1,v=>Math.round(v)+"%"],
+ ["solar","Solar radiation",0,150,5,v=>Math.round(v)+"% of forecast"],["precip","Rain",0,10,.1,v=>v.toFixed(1)+" mm/h"],
+ ["snow","Snowfall",0,5,.1,v=>v.toFixed(1)+" cm/h"],["month","Month",1,12,1,v=>MON[Math.round(v)-1]]];
+const FACT=[{k:"dT",n:"Temperature",v:range(-15,15,31),f:(v,x)=>(x[FI.temp]+v).toFixed(0)+"°C"},
+ {k:"humidity",n:"Humidity",v:range(20,100,17),f:v=>Math.round(v)+"%"},{k:"wind",n:"Wind",v:range(0,40,17),f:v=>Math.round(v)+" km/h"},
+ {k:"cloud",n:"Cloud cover",v:range(0,100,11),f:v=>Math.round(v)+"%"},{k:"solar",n:"Solar radiation",v:range(0,150,16),f:v=>Math.round(v)+"%"},
+ {k:"precip",n:"Rain",v:range(0,5,11),f:v=>v.toFixed(1)+" mm/h"},{k:"snow",n:"Snowfall",v:range(0,2,11),f:v=>v.toFixed(1)+" cm/h"},
+ {k:"month",n:"Season (month)",v:range(1,12,12),f:v=>MON[Math.round(v)-1]},
+ {k:"day",n:"Day type",v:["weekday","saturday","sunday","holiday"],f:v=>v}];
+const IN={},LB={};
+function buildCtl(){const box=$("ctl");SLD.forEach(([k,n,lo,hi,st,fmt])=>{const l=document.createElement("label");l.innerHTML=n+"<b></b>";
+  const i=document.createElement("input");i.type="range";i.min=lo;i.max=hi;i.step=st;i.oninput=()=>{Sc[k]=+i.value;drawEx()};
+  l.appendChild(i);box.appendChild(l);IN[k]=i;LB[k]=[l.querySelector("b"),fmt]});
+ const l=document.createElement("label");l.innerHTML='Day type<select id="dayType"><option value="">as forecast</option><option>weekday</option><option>saturday</option><option>sunday</option><option>holiday</option></select>';
+ box.appendChild(l);l.querySelector("select").onchange=e=>{Sc.day=e.target.value||null;drawEx()};
+ const d=$("pd");FACT.filter(f=>f.k!="day").forEach(f=>{const q=document.createElement("div");q.innerHTML=`<p style="margin:0"><b>${f.n}</b></p><canvas class="sm"></canvas>`;d.appendChild(q);f.c=q.querySelector("canvas")})}
+function resetSc(){const x=FC.X[sel],g=n=>x[FI[n]];Sc={dT:0,humidity:g("humidity"),wind:g("wind"),cloud:g("cloud"),solar:100,precip:g("precip"),snow:g("snow"),month:g("month"),day:null};
+ if($("dayType"))$("dayType").value=""}
+function drawEx(){
+ if(!window.FC||!window.WM||!FC.u.length){$("exTitle").textContent="Waiting for forecast and model data.";return}
+ const x0=FC.X[sel],base=pred(x0,Sc);
+ SLD.forEach(([k,,,,,fmt])=>{IN[k].value=Sc[k];LB[k][0].textContent=fmt(Sc[k])});
+ $("exTitle").innerHTML=`<b>${lab(FC.t[sel])}</b> Toronto time: forecast ${MW(FC.pred[sel])}; with your settings <b>${MW(base)}</b>`;
+ const R=FACT.map(f=>({f,ys:f.v.map(v=>pred(x0,{...Sc,[f.k]:v}))}));
+ const T=R.map(r=>{const lo=Math.min(...r.ys),hi=Math.max(...r.ys);return{f:r.f,lo,hi,vl:r.f.v[r.ys.indexOf(lo)],vh:r.f.v[r.ys.indexOf(hi)]}}).sort((a,b)=>(b.hi-b.lo)-(a.hi-a.lo));
+ const sc=Math.max(...T.map(t=>Math.max(Math.abs(t.lo-base),Math.abs(t.hi-base))))||1,sg=d=>(d>0?"+":"")+Math.round(d);
+ $("tor").innerHTML=T.map(t=>`<div class=row><span>${t.f.n}</span><div class=bar><u></u><i style="left:${50+(t.lo-base)/sc*50}%;width:${(t.hi-t.lo)/sc*50}%"></i></div>
+  <span>${t.f.f(t.vl,x0)}: ${sg(t.lo-base)} MW<br>${t.f.f(t.vh,x0)}: ${sg(t.hi-base)} MW</span></div>`).join("");
+ const pr=R.filter(r=>r.f.k!="day"),all=pr.flatMap(r=>r.ys),yr=$("shy").checked?[Math.min(...all),Math.max(...all)]:null;
+ pr.forEach(r=>{const f=r.f,t0=x0[FI.temp],xs=f.k=="dT"?f.v.map(v=>t0+v):f.v,cur=f.k=="dT"?t0+Sc.dT:Sc[f.k];
+  plot(f.c,xs,[{ys:r.ys,color:css("--ac")}],{yr,dot:[cur,base],nt:4,xf:v=>f.k=="dT"?v.toFixed(0)+"°":f.k=="month"?MON[Math.round(v)-1]:String(f.f(v,x0)).replace(/ .*/,"")})})}
+
+function render(){if(window.FC&&window.WM&&FC.u.length&&!IN.dT){buildCtl();resetSc()}cards();drawFc();drawLog();drawEx()}
+function reload(){let n=2;for(const f of["demand_log.js","forecast.js"]){const s=document.createElement("script");s.src=f+"?"+Date.now();
+ s.onload=s.onerror=()=>{s.remove();if(!--n){if(window.FC&&window.WM){sel=Math.min(sel,FC.u.length-1)}render()}};document.head.appendChild(s)}}
+$("rng").onchange=drawLog;addEventListener("resize",render);setInterval(reload,300000);
+render();
+</script></main></body></html>

@@ -4,6 +4,7 @@ import time
 from xml.etree import ElementTree
 
 import holidays
+import numpy as np
 import pandas as pd
 import requests
 
@@ -25,13 +26,28 @@ TEMP_DERIVED = ["hdd", "cdd", "temp_lag1", "temp_lag3", "temp_lag24", "temp_roll
                 "temp_roll72", "dtemp3"]
 CALENDAR = ["hour", "dow", "month", "doy", "hol", "hol_before", "hol_after", "xmas", "nonwork"]
 
-# "Now" model: knows demand up to the previous hour (accurate for the current hour).
-NOW_LAGS = [1, 2, 3, 24, 48, 168]
-NOW_FEATURES = (WEATHER + TEMP_DERIVED + [f"dem_lag{k}" for k in NOW_LAGS]
-                + ["dem_roll24", "dem_trend"] + CALENDAR)
+
+
+def hourly_features(h):
+    """Features for a model that knows demand up to h hours before the hour being predicted."""
+    lags = [h, h + 1, h + 2, 24, 48, 168]
+    return (WEATHER + TEMP_DERIVED + [f"dem_lag{k}" for k in lags]
+            + [f"dem_roll24_h{h}", f"dem_trend_h{h}"] + CALENDAR)
+
+
+NOW_FEATURES = hourly_features(1)    # "this hour": knows demand through the previous hour
+NEXT_FEATURES = hourly_features(2)   # "next hour": same latest known hour, one hour further ahead
 # "Week" model: only uses demand from >= 7 days earlier, so it can forecast 7 days ahead.
 WEEK_FEATURES = (WEATHER + TEMP_DERIVED + ["dtemp168", "dem_lag168", "dem_lag336", "dem_wk_mean"]
                  + CALENDAR)
+
+# Polynomial model: a fixed formula in weather + calendar only (no recent demand).
+POLY_CORE = ["temp", "h_s1", "h_c1", "h_s2", "h_c2", "nonwork", "solar"]   # full polynomial terms
+POLY_LINEAR = (["feels", "humidity", "dew", "wind", "cloud", "precip", "snow", "hdd", "cdd",
+                "temp_lag1", "temp_lag3", "temp_lag24", "temp_roll24", "temp_roll72",
+                "doy_s", "doy_c", "year_frac", "hol", "hol_before", "hol_after", "xmas"]
+               + [f"dow{k}" for k in range(1, 7)])                           # linear terms
+POLY_FEATURES = POLY_CORE + POLY_LINEAR
 
 _HOL = pd.to_datetime(list(holidays.Canada(subdiv="ON", years=range(2018, 2034)).keys()))
 
@@ -126,7 +142,8 @@ def fetch_demand(years):
 
 
 def fetch_live_demand():
-    """Latest Ontario 5-minute demand. Returns {'timestamp': naive EST, 'demand': MW}."""
+    """Ontario 5-minute demand for the current IESO hour (timestamps are naive EST).
+    Returns the newest reading plus all readings of the hour in 'rows'."""
     r = requests.get("https://reports-public.ieso.ca/public/RealtimeTotals/PUB_RealtimeTotals.xml",
                      timeout=60)
     r.raise_for_status()
@@ -152,7 +169,8 @@ def fetch_live_demand():
             rows.append({"timestamp": base + pd.DateOffset(minutes=(interval - 1) * 5), "demand": mw})
     if not rows:
         raise RuntimeError("No Ontario demand intervals found in IESO report")
-    return rows[-1]
+    # all intervals of the current delivery hour (timestamps are naive EST), plus the newest one
+    return {**rows[-1], "rows": rows, "hour_start": base}
 
 
 def make_features(w, dem):
@@ -169,10 +187,11 @@ def make_features(w, dem):
     # Demand lags are computed on the full demand history (not just the weather window),
     # so 1- and 2-week lags exist for every forecast hour.
     d = dem.reindex(pd.date_range(min(dem.index.min(), f.index.min()), f.index.max(), freq="h"))
-    for k in sorted(set(NOW_LAGS) | {336}):
+    for k in (1, 2, 3, 4, 24, 48, 168, 336):
         f[f"dem_lag{k}"] = d.shift(k).reindex(f.index)
-    f["dem_roll24"] = d.shift(1).rolling(24).mean().reindex(f.index)
-    f["dem_trend"] = f["dem_lag1"] - f["dem_lag2"]
+    for h in (1, 2):
+        f[f"dem_roll24_h{h}"] = d.shift(h).rolling(24).mean().reindex(f.index)
+        f[f"dem_trend_h{h}"] = f[f"dem_lag{h}"] - f[f"dem_lag{h + 1}"]
     f["dem_wk_mean"] = d.shift(168).rolling(168).mean().reindex(f.index)
     f["demand"] = d.reindex(f.index)
 
@@ -185,12 +204,28 @@ def make_features(w, dem):
     f["hol_after"] = (day - pd.DateOffset(days=1)).isin(_HOL).astype(int)
     f["xmas"] = (((loc.month == 12) & (loc.day >= 24)) | ((loc.month == 1) & (loc.day <= 2))).astype(int)
     f["nonwork"] = ((loc.dayofweek >= 5) | (f["hol"].values == 1)).astype(int)
+
+    # extra columns used only by the polynomial model
+    a, b = 2 * np.pi * np.asarray(loc.hour) / 24, 2 * np.pi * np.asarray(loc.dayofyear) / 365.25
+    f["h_s1"], f["h_c1"], f["h_s2"], f["h_c2"] = np.sin(a), np.cos(a), np.sin(2 * a), np.cos(2 * a)
+    f["doy_s"], f["doy_c"] = np.sin(b), np.cos(b)
+    f["year_frac"] = np.asarray(loc.year) + (np.asarray(loc.dayofyear) - 1) / 365.25
+    for k in range(1, 7):
+        f[f"dow{k}"] = (np.asarray(loc.dayofweek) == k).astype(int)
     return f
 
 
+def predict_hourly(model, X, h):
+    """Hourly models predict the change from the demand known h hours earlier."""
+    return X[f"dem_lag{h}"] + model.predict(X[hourly_features(h)])
+
+
 def predict_now(model, X):
-    """Both models predict the change from a known past demand value."""
-    return X["dem_lag1"] + model.predict(X[NOW_FEATURES])
+    return predict_hourly(model, X, 1)
+
+
+def predict_next(model, X):
+    return predict_hourly(model, X, 2)
 
 
 def predict_week(model, X):
