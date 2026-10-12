@@ -19,9 +19,13 @@ li{margin:5px 0}
 
 <h2>Where to go</h2>
 <div class="pages">
-<a class="tile" href="dashboard.html"><h3>Gradient boosting dashboard</h3><p>The main page. Predictions for this hour and next hour, the real demand, a 7-day forecast, and an explorer showing what drives demand.</p></a>
-<a class="tile" href="polynomial.html"><h3>Polynomial model</h3><p>A simpler model that is one written-out formula. Move sliders, read the full equation, or predict right now from live weather.</p></a>
-<a class="tile" href="compare.html"><h3>Comparison</h3><p>Which model is more accurate? Error scores for next-hour and 7-day forecasts, from history and from live results.</p></a>
+<a class="tile" href="dashboard.html"><h3>Gradient boosting + recent demand</h3><p>The main dashboard: this-hour and next-hour predictions, real demand, a 7-day forecast and an explorer showing what drives demand.</p></a>
+<a class="tile" href="compare.html"><h3>Comparison</h3><p>All six models and the IESO's own forecast, scored against real demand for the next hour and the next 7 days.</p></a>
+<a class="tile" href="gbm_weather.html"><h3>Gradient boosting, weather only</h3><p>The same technique with no demand numbers as input.</p></a>
+<a class="tile" href="polynomial.html"><h3>Polynomial, weather only</h3><p>One written-out formula. Opens on the live prediction; sliders, full equation and graphs.</p></a>
+<a class="tile" href="poly_demand.html"><h3>Polynomial + recent demand</h3><p>A fixed formula that also has terms for recent demand.</p></a>
+<a class="tile" href="nn_demand.html"><h3>Neural network + recent demand</h3><p>A small neural network that is shown recent demand.</p></a>
+<a class="tile" href="nn_weather.html"><h3>Neural network, weather only</h3><p>The same kind of network with only weather and calendar inputs.</p></a>
 <div class="tile" style="cursor:default"><h3>This page</h3><p>A short guide to reading everything on the site.</p></div></div>
 
 <h2>The quick tour</h2>
@@ -37,7 +41,7 @@ li{margin:5px 0}
 <dl>
 <dt>This hour / Next hour</dt><dd>Predictions for the hour on the clock now and the one after it. Times are Toronto time and each hour is labelled by when it starts, so "15:00" means 3:00 to 4:00 pm. The small grey text says which model made the number.</dd>
 <dt>Actual demand this hour (so far)</dt><dd>The average of the grid operator's 5-minute readings since the hour began, so it is a like-for-like comparison with an hourly prediction. Early in the hour it is based on only a few readings and can still move. The percentage shows how far the prediction is from it.</dd>
-<dt>Last completed hour</dt><dd>The most recent full hour the IESO has published. It is usually the previous hour, but the IESO can take a little while to post it.</dd>
+<dt>Last completed hour</dt><dd>Actual demand for the hour that just ended. It comes from the IESO's live hourly feed; the IESO's official daily file only catches up about a day later, and the page switches to it automatically. If it isn't available yet the box says so instead of showing an older hour.</dd>
 <dt>Accuracy</dt><dd>The typical size of the this-hour model's miss over the last 7 days (mean absolute error, in MW, and as a percentage of demand).</dd>
 <dt>Prediction vs actual graph</dt><dd>Orange is what the model predicted, dark is what really happened. Solid dots were predicted before the hour began; hollow dots were calculated afterwards from past data, so they are a little less honest as a test.</dd>
 </dl>
@@ -49,9 +53,12 @@ li{margin:5px 0}
 <li><b>The sliders.</b> Temperature change shifts the whole weather picture warmer or colder. The others set that factor directly. Press <i>Reset to the forecast</i> to go back to the real forecast for the hour you picked.</li>
 </ul>
 
-<h2>The two models in plain language</h2>
-<div class="box"><b>Polynomial.</b> One fixed mathematical formula that turns the weather and the calendar (hour, day of week, holidays, season) into a demand number. It never looks at recent demand. Everything it does is visible on its page, down to every coefficient.</div>
-<div class="box"><b>Gradient boosting.</b> A team of hundreds of small decision trees, each correcting the mistakes of the ones before it. It also uses demand from the last few hours and from the same hour a week earlier, which makes it very accurate for the next hour or two. For the 7-day forecast it can only use demand from at least a week back, since nothing newer is known yet.</div>
+<h2>The six models in plain language</h2>
+<p>Every model comes in two flavours. <b>"+ recent demand"</b> models are shown how much electricity Ontario used in the last few hours (or, for the 7-day forecast, a week or two ago), which makes them very accurate for the next hour or two. <b>"Weather only"</b> models see just the weather and the calendar (hour, weekday, holidays, season) and never any demand figures, so they show how far weather alone can take you. There are three techniques:</p>
+<div class="box"><b>Polynomial.</b> One fixed mathematical formula that turns the inputs into a demand number. Everything it does is visible on its page, down to every coefficient.</div>
+<div class="box"><b>Gradient boosting.</b> A team of hundreds of small decision trees, each correcting the mistakes of the ones before it. Good at sharp effects such as holidays and the morning ramp.</div>
+<div class="box"><b>Neural network.</b> Layers of simple weighted sums with a bend between them, trained with PyTorch and averaged over several training runs. It can learn smooth, complicated patterns but, unlike the polynomial, can't be read as a single formula.</div>
+<p>The site also shows the <b>IESO's own forecast</b> (the grid operator's official prediction) next to the models, as the benchmark to beat.</p>
 
 <h2>How accurate is it?</h2>
 <p>Expect the next-hour predictions to be off by roughly one to two percent, and the 7-day forecast to be somewhat worse because it depends on weather forecasts, which get less certain days ahead. The <a href="compare.html">Comparison</a> page has the exact scores. Odd days (holidays, storms, heat waves, outages) are the hardest to predict.</p>
@@ -60,13 +67,16 @@ li{margin:5px 0}
 <ul>
 <li><b>Demand:</b> the IESO's public reports (hourly history and 5-minute live readings).</li>
 <li><b>Weather:</b> Open-Meteo, averaged over seven Ontario cities weighted roughly by population.</li>
-<li><b>Updates:</b> an automatic job runs twice an hour and publishes new numbers. These pages reload their data every 5 minutes on their own, so you can leave them open.</li>
+<li><b>The IESO's forecast:</b> the grid operator's published hourly forecast, saved before each hour so it can be scored fairly.</li>
+<li><b>Updates:</b> an automatic job runs about every 15 minutes and publishes new numbers. These pages reload their data every 5 minutes on their own, so you can leave them open.</li>
 </ul>
 
 <h2>If something looks wrong</h2>
 <dl>
+<dt>A yellow bar appears at the top</dt><dd>The data is out of date or one of the sources (weather, IESO feeds) is failing. The bar says which. The predictions shown are the last good ones.</dd>
 <dt>A box shows "-" or the page says "No data yet"</dt><dd>The first automatic update hasn't run, or the data files haven't been published yet.</dd>
-<dt>The "this hour" prediction is missing</dt><dd>The model needs the previous hour's demand, which the IESO hasn't posted yet. The box falls back to another model and says so; the proper number appears within a few minutes.</dd>
+<dt>"Actual demand this hour" shows a dash early in the hour</dt><dd>The IESO's first readings for a new hour take a few minutes to arrive. The box only ever shows the current hour, never an older one.</dd>
+<dt>The "this hour" prediction says it came from the 7-day forecast</dt><dd>The model needs the previous hour's demand, which isn't available yet. It falls back to the 7-day forecast run and says so; the proper number appears within a few minutes.</dd>
 <dt>Times look an hour off</dt><dd>Everything is shown in Toronto time, including during daylight saving. The IESO itself reports in standard time all year, and the site converts for you.</dd>
 </dl>
 <p class="mut">This is an independent hobby project and is not affiliated with the IESO. Predictions are estimates and shouldn't be used for trading or operational decisions.</p>

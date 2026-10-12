@@ -19,8 +19,11 @@ label{display:block;margin:7px 0 2px;font-size:13px}label b{float:right;font-wei
 .bar{position:relative;height:16px;background:var(--bg);border-radius:3px}.bar i{position:absolute;top:0;height:100%;background:var(--ac);opacity:.85;border-radius:3px}
 .bar u{position:absolute;left:50%;top:-2px;height:20px;border-left:1px solid var(--fg)}
 button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:7px 12px;font-size:13px;font-weight:600;cursor:pointer;margin-top:8px}
+.warn{background:#fff3cd;color:#664d03;border:1px solid #ffda6a;border-radius:8px;padding:8px 12px;margin:0 0 12px;font-size:13px}
+@media(prefers-color-scheme:dark){.warn{background:#3d3210;color:#ffe08a;border-color:#6b5a1f}}
 </style></head><body><main>
 <h1>Gradient boosting dashboard</h1>
+<div id="banner" class="warn" style="display:none"></div>
 <div class="cards">
 <div class="card"><span>This hour: prediction</span><b id="p">-</b><small id="pt"></small></div>
 <div class="card"><span>Next hour: prediction</span><b id="n">-</b><small id="nt"></small></div>
@@ -30,7 +33,7 @@ button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:7px 12
 
 <div class="panel"><h2>7-day forecast</h2>
 <canvas id="cf"></canvas>
-<p>Click the graph to choose an hour to explain in the explorer below (dashed line). All times are Toronto time.</p>
+<p>Orange = this model, purple = the IESO's own official forecast (it covers only the next day or so, plus more when the IESO's long-range report is available). Click the graph to choose an hour to explain in the explorer below (dashed line). All times are Toronto time.</p>
 <div id="days"></div></div>
 
 <div class="panel"><h2>Past hours: prediction vs actual</h2>
@@ -54,29 +57,11 @@ button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:7px 12
 <script src="common.js"></script>
 <script>
 /* ---------- cards + past chart ---------- */
-function cards(){
- const L=window.LOG||[],M=window.LOG_META||{},F=window.FC,H=36e5,t0=Math.floor(Date.now()/H)*H;
- const key=ms=>new Date(ms).toISOString().slice(0,13)+":00",
- tl=ms=>new Date(ms).toLocaleString("sv-SE",{timeZone:"America/Toronto"}).slice(0,13)+":00";
- const fcAt=k=>{const i=F?F.u.indexOf(k):-1;return i<0?null:F.pred[i]};
- const pick=(k,fields)=>{const r=L.find(r=>r.u==k);if(r)for(const[f,s]of fields)if(r[f]!=null)return[r[f],s];
-  const v=fcAt(k);return v==null?[null,""]:[v,"7-day model"]};
- const show=(b,t,v,s,ms)=>{$(b).textContent=v==null?"-":MW(v);$(t).textContent=tl(ms).slice(5)+" Toronto time"+(v==null?"":" · "+s)};
- const[a,as]=pick(key(t0),[["pred","hourly model"],["pn","next-hour model"]]),[b,bs]=pick(key(t0+H),[["pn","next-hour model"]]);
- show("p","pt",a,as,t0);show("n","nt",b,bs,t0+H);
- if(M.live_mw!=null){$("l").textContent=MW(M.live_mw);
-  $("lt").textContent=lab(M.live_t).slice(5)+" hour · average of "+M.live_n+" readings (latest "+M.live_last+")"+
-   (a!=null&&lab(M.live_t)==tl(t0)?" · prediction is "+((100*(a/M.live_mw-1)).toFixed(1)).replace(/^(\d)/,"+$1")+"%":"")}
- const la=[...L].reverse().find(r=>r.actual!=null);
- if(la){$("a").textContent=MW(la.actual);$("at").textContent=lab(la.t).slice(5)+" Toronto time"}
- const wk=L.slice(-168).filter(r=>r.actual!=null&&r.pred!=null),live=wk.filter(r=>!r.bf),use=live.length>=12?live:wk;
- if(use.length){const e=use.map(r=>r.pred-r.actual),mae=e.reduce((s,x)=>s+Math.abs(x),0)/e.length;
-  $("m").textContent="±"+Math.round(mae)+" MW";
-  $("mt").textContent="this-hour model, "+use.length+(use===live?" live":" retrospective")+" hours, "+(100*e.reduce((s,x,i)=>s+Math.abs(x)/use[i].actual,0)/e.length).toFixed(2)+"% error"}}
+function cards(){cardsFor("gbm")}
 function drawLog(){
  const L=window.LOG||[];if(!L.length){$("msg").textContent="No data yet: the first update hasn't run.";return}
  const D=L.slice(-+$("rng").value);
- plot($("c"),D.map((_,i)=>i),[{ys:D.map(r=>r.actual),color:css("--fg")},{ys:D.map(r=>r.pred),color:css("--ac"),dots:D.length<=100,hollow:D.map(r=>r.bf)}],
+ plot($("c"),D.map((_,i)=>i),[{ys:D.map(r=>r.actual),color:css("--fg")},{ys:D.map(r=>r.gbm_h),color:css("--ac"),dots:D.length<=100,hollow:D.map(r=>r.bf)}],
   {xf:(x,j)=>D[j].t.slice(5,13).replace("T"," ")+"h"});
  $("msg").textContent="Last update: "+(window.LOG_META?new Date(LOG_META.updated).toLocaleString():"-")}
 
@@ -84,7 +69,7 @@ function drawLog(){
 let sel=0,Sc={};
 function drawFc(){
  const F=window.FC;if(!F||!F.u.length){$("days").textContent="Forecast not available yet.";return}
- plot($("cf"),F.u.map((_,i)=>i),[{ys:F.pred,color:css("--ac")}],{mark:sel,nt:8,
+ plot($("cf"),F.u.map((_,i)=>i),[{ys:F.pred,color:css("--ac")},{ys:F.ieso||[],color:IESO.c}],{mark:sel,nt:8,
   xf:(x,j)=>DOW[new Date(F.t[j].slice(0,10)+"T12:00:00").getDay()]+" "+F.t[j].slice(11,13)+"h"});
  const D={};F.t.forEach((t,i)=>(D[t.slice(0,10)]=D[t.slice(0,10)]||[]).push(i));
  $("days").innerHTML="<table><tr><th>Day</th><th>Peak</th><th>At</th><th>Lowest</th><th>Avg temp</th></tr>"+Object.entries(D).map(([d,ix])=>{
@@ -142,7 +127,7 @@ function drawEx(){
  pr.forEach(r=>{const f=r.f,t0=x0[FI.temp],xs=f.k=="dT"?f.v.map(v=>t0+v):f.v,cur=f.k=="dT"?t0+Sc.dT:Sc[f.k];
   plot(f.c,xs,[{ys:r.ys,color:css("--ac")}],{yr,dot:[cur,base],nt:4,xf:v=>f.k=="dT"?v.toFixed(0)+"°":f.k=="month"?MON[Math.round(v)-1]:String(f.f(v,x0)).replace(/ .*/,"")})})}
 
-function render(){if(window.FC&&window.WM&&FC.u.length&&!IN.dT){buildCtl();resetSc()}cards();drawFc();drawLog();drawEx()}
+function render(){banner();if(window.FC&&window.WM&&FC.u.length&&!IN.dT){buildCtl();resetSc()}cards();drawFc();drawLog();drawEx()}
 function reload(){let n=2;for(const f of["demand_log.js","forecast.js"]){const s=document.createElement("script");s.src=f+"?"+Date.now();
  s.onload=s.onerror=()=>{s.remove();if(!--n){if(window.FC&&window.WM){sel=Math.min(sel,FC.u.length-1)}render()}};document.head.appendChild(s)}}
 $("rng").onchange=drawLog;addEventListener("resize",render);setInterval(reload,300000);

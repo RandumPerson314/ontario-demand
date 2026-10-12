@@ -1,48 +1,46 @@
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><script src="nav.js"></script>
-<title>Polynomial vs gradient boosting</title>
+<link rel="stylesheet" href="model.css"><title>Model comparison</title>
 <style>
-:root{--bg:#fff;--fg:#1d2733;--mut:#6b7785;--card:#f4f6f9;--ac:#d9480f;--bd:#dde2e8;--pl:#2f7fd1}
-@media(prefers-color-scheme:dark){:root{--bg:#14181d;--fg:#e6eaee;--mut:#8b96a3;--card:#1e242b;--bd:#313a44;--pl:#5aa2ee}}
-body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--fg)}
-main{max-width:1050px;margin:auto;padding:16px}h1{font-size:22px;margin:0 0 6px}h2{font-size:17px;margin:0 0 6px}h3{font-size:14px;margin:14px 0 4px}
-.panel{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:14px}
-p{color:var(--mut);font-size:13px;margin:4px 0}canvas{width:100%;height:250px;display:block}
-table{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0}td,th{padding:5px 8px;border-bottom:1px solid var(--bd);text-align:right;font-weight:400}
-th{color:var(--mut)}th:first-child,td:first-child{text-align:left}td.best{font-weight:700;color:var(--ac)}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:760px){.two{grid-template-columns:1fr}}
-.key{font-size:13px;color:var(--mut)}.key i{display:inline-block;width:18px;height:3px;vertical-align:middle;margin:0 4px 0 12px}
-.verdict{font-size:15px;color:var(--fg);margin:8px 0}
+td.best{font-weight:700;color:var(--ac)}.lg label{display:inline-flex;align-items:center;gap:5px;margin:3px 14px 3px 0;font-size:13px}
+.lg i{display:inline-block;width:16px;height:4px;border-radius:2px}.verdict{font-size:14px;color:var(--fg);margin:8px 0}
+.warn{background:#fff3cd;color:#664d03;border:1px solid #ffda6a;border-radius:8px;padding:8px 12px;margin:0 0 12px;font-size:13px}
+@media(prefers-color-scheme:dark){.warn{background:#3d3210;color:#ffe08a;border-color:#6b5a1f}}
 </style></head><body><main>
-<h1>Polynomial vs gradient boosting</h1>
-<p>Two different ways to predict Ontario demand. The <b>polynomial</b> is one fixed formula using only weather and calendar. <b>Gradient boosting</b> is a team of small decision trees that can also use recent demand. Here they are compared on the same hours, for the two things the site predicts: the <b>next hour</b> and the <b>next 7 days</b>.</p>
-<p class="key"><i style="background:var(--ac)"></i>Gradient boosting<i style="background:var(--pl)"></i>Polynomial<i style="background:var(--mut)"></i>Naive baseline</p>
+<h1>Model comparison</h1>
+<div id="banner" class="warn" style="display:none"></div>
+<p>Six models predict Ontario's electricity demand, and the IESO (the grid operator) publishes its own forecast. They are compared here on the same hours, for the two things this site predicts: the <b>next hour</b> and the <b>next 7 days</b>. A "naive" guess (repeat an earlier hour) is included as a yardstick: a model that can't beat it isn't adding much.</p>
+<div class="panel"><b>Show on the graphs and in the live tables:</b><div class="lg" id="lg"></div></div>
 
 <div class="panel"><h2>1. Backtest on held-out history</h2>
 <p id="btinfo">Loading...</p><div id="bt"></div>
 <div class="two"><div><h3>Next-hour forecast: average error by hour of day</h3><canvas id="bh1"></canvas></div>
 <div><h3>7-day forecast: average error by hour of day</h3><canvas id="bh2"></canvas></div></div>
-<p>A backtest replays history the models never saw while training (they were fitted on earlier years). It uses the actual recorded weather, so it shows each model's skill when the weather forecast is perfect. Lower is better; the best value in each column is highlighted.</p></div>
+<p>A backtest replays history the models never saw while training (they were fitted on earlier years), using the recorded weather, so it shows each model's skill when the weather is known perfectly. Lower is better; the best value in each column is highlighted. The IESO is not in the backtest because its past forecasts aren't available.</p></div>
 
 <div class="panel"><h2>2. Live results so far</h2>
-<p>Every prediction the website makes is saved before the hour happens, then scored against IESO's actual demand once published. These numbers use real weather forecasts, so expect them to be a little worse than the backtest.</p>
+<p>Every prediction is saved before its hour happens, then scored against the IESO's actual demand. These use real weather forecasts, so expect them to be a little worse than the backtest. Models are scored on exactly the same hours so the comparison is fair.</p>
+<label style="display:block;margin:6px 0">Score <select id="incl"><option value="live">only predictions made before the hour started</option><option value="all">all hours, including ones calculated afterwards</option></select></label>
 <div id="live"></div>
 <h3>7-day forecast error by how far ahead</h3><div id="lead"></div><canvas id="cl"></canvas>
-<h3>Recent hours</h3><canvas id="cr"></canvas>
-<p id="recentNote"></p></div>
+<h3>Recent hours: next-hour forecasts</h3><canvas id="cr"></canvas>
+<p>Dark = actual demand; coloured lines = each model's forecast made an hour ahead; purple = the IESO's forecast.</p></div>
 
-<div class="panel"><h2>3. Today's 7-day forecasts side by side</h2><canvas id="cs"></canvas>
-<p>Where the lines pull apart, the models disagree. Neither is guaranteed right, so the gap is a rough measure of uncertainty.</p></div>
+<div class="panel"><h2>3. The 7-day forecasts side by side</h2><canvas id="cs"></canvas>
+<p>Where the lines pull apart, the models disagree. The IESO line only covers the part of the week its published forecast reaches.</p></div>
 
 <script src="demand_log.js"></script><script src="forecast.js"></script><script src="forecast_archive.js"></script><script src="backtest.js"></script>
 <script src="common.js"></script>
 <script>
-const COL={gb:css("--ac"),poly:css("--pl"),naive:css("--mut")},KEYS=["gb","poly","naive"];
-const NAME={gb:"Gradient boosting",poly:"Polynomial"},pct=(a,b)=>Math.round(Math.abs(1-a/b)*100);
-function table(head,rows,bestCols){ // rows: [label, ...numbers]; bestCols: indexes where the smallest value wins
+const ALL=[...MIDS,"ieso","naive"],SHOW=new Set(ALL);
+const NAME=i=>i=="ieso"?IESO.n:i=="naive"?"Naive baseline":MODELS[i].n,COL=i=>i=="ieso"?IESO.c:i=="naive"?css("--mut"):MODELS[i].c;
+function table(head,rows,bestCols){
  const best={};bestCols.forEach(c=>best[c]=Math.min(...rows.map(r=>r[c]).filter(v=>v!=null)));
  return"<table><tr>"+head.map(h=>"<th>"+h+"</th>").join("")+"</tr>"+rows.map(r=>"<tr>"+r.map((v,i)=>
-  `<td${i&&bestCols.includes(i)&&v===best[i]?' class="best"':""}>${i==0?v:(v==null?"-":(typeof v=="number"?v.toLocaleString(undefined,{maximumFractionDigits:2}):v))}</td>`).join("")+"</tr>").join("")+"</table>"}
+  `<td${i&&bestCols.includes(i)&&v===best[i]?' class="best"':""}>${i==0?v:v==null?"-":typeof v=="number"?v.toLocaleString(undefined,{maximumFractionDigits:2}):v}</td>`).join("")+"</tr>").join("")+"</table>"}
+function legend(){$("lg").innerHTML=ALL.map(i=>`<label><input type="checkbox" data-i="${i}" ${SHOW.has(i)?"checked":""}><i style="background:${COL(i)}"></i>${NAME(i)}</label>`).join("");
+ $("lg").querySelectorAll("input").forEach(e=>e.onchange=()=>{e.checked?SHOW.add(e.dataset.i):SHOW.delete(e.dataset.i);render()})}
 
 /* ---------- 1. backtest ---------- */
 function backtest(){
@@ -50,44 +48,50 @@ function backtest(){
  $("btinfo").textContent=`Tested on ${B.next.n.toLocaleString()} hours (next-hour) and ${B.week.n.toLocaleString()} hours (7-day), ${B.next.start} to ${B.next.end}.`;
  let html="";
  for(const[task,title]of[["next","Next-hour forecast"],["week","7-day forecast"]]){
-  const T=B[task],m=T.models,label={gb:"Gradient boosting",poly:"Polynomial",naive:T.naive_label};
-  html+=`<h3>${title}</h3>`+table(["Model","Avg error (MW)","Avg error (%)","RMSE (MW)","Bias (MW)"],
-   KEYS.map(k=>[label[k],m[k].mae,m[k].mape,m[k].rmse,Math.abs(m[k].bias)]),[1,2,3,4]).replace("<th>Bias (MW)</th>","<th>|Bias| (MW)</th>");
-  const g=m.gb.mae,p=m.poly.mae;
-  html+=`<p class="verdict">${g<p?"Gradient boosting":"The polynomial"} wins: its average error is ${pct(Math.min(g,p),Math.max(g,p))}% lower (${Math.round(Math.min(g,p))} vs ${Math.round(Math.max(g,p))} MW).</p>`}
+  const T=B[task],ids=ALL.filter(i=>T.models[i]&&SHOW.has(i)).sort((a,b)=>T.models[a].mae-T.models[b].mae);
+  if(!ids.length)continue;
+  html+=`<h3>${title}</h3>`+table(["Model","Avg error (MW)","Avg error (%)","RMSE (MW)","|Bias| (MW)"],
+   ids.map(i=>[i=="naive"?T.naive_label:NAME(i),T.models[i].mae,T.models[i].mape,T.models[i].rmse,Math.abs(T.models[i].bias)]),[1,2,3,4]);
+  const real=ids.filter(i=>i!="naive");
+  if(real.length>1&&T.models.naive){const b=real[0],n=T.models.naive.mae,m=T.models[b].mae;
+   html+=`<p class="verdict">Most accurate: <b>${NAME(b)}</b> (${Math.round(m)} MW average error), ${Math.round(100*(1-m/n))}% better than the naive baseline.</p>`}}
  $("bt").innerHTML=html;
- [["bh1","next"],["bh2","week"]].forEach(([id,task])=>plot($(id),[...Array(24).keys()],
-  KEYS.map(k=>({ys:B[task].by_hour[k],color:COL[k]})),{xf:x=>x+"h",nt:7}))}
+ [["bh1","next"],["bh2","week"]].forEach(([id,task])=>{const ids=ALL.filter(i=>B[task].by_hour[i]&&SHOW.has(i));
+  if(ids.length)plot($(id),[...Array(24).keys()],ids.map(i=>({ys:B[task].by_hour[i],color:COL(i)})),{xf:x=>x+"h",nt:7})})}
 
 /* ---------- 2. live results ---------- */
-function stat(rows,f){const e=rows.filter(r=>r[f]!=null&&r.actual!=null);
- return[e.length,e.length?e.reduce((s,r)=>s+Math.abs(r[f]-r.actual),0)/e.length:null,e.length?100*e.reduce((s,r)=>s+Math.abs(r[f]-r.actual)/r.actual,0)/e.length:null]}
-function liveTables(){
- const L=window.LOG||[],spec=[["Gradient boosting: next hour","pn"],["Gradient boosting: this hour","pred"],["Polynomial","pp"]];
- const mk=(rows,title)=>{const R=spec.map(([n,f])=>{const[c,a,p]=stat(rows,f);return[n,c,a,p]});
-  return`<h3>${title}</h3>`+table(["Model","Hours scored","Avg error (MW)","Avg error (%)"],R,[2,3])};
- const live=L.filter(r=>!r.bf),all=L.filter(r=>r.actual!=null);
- let html=live.filter(r=>r.actual!=null).length?mk(live,"Predictions made live, before each hour"):"<p>Live tracking has only just started. Results appear here once IESO publishes the actual demand for hours the site predicted in advance.</p>";
- if(live.filter(r=>r.actual!=null).length<48)html+=mk(all,"Including hours predicted after the fact (last 30 days)");
- $("live").innerHTML=html;
- const act={};L.forEach(r=>{if(r.actual!=null)act[r.u]=r.actual});
+function liveSection(){
+ const L=window.LOG||[],incl=$("incl").value=="all",rows=L.filter(r=>r.actual!=null&&(incl||!r.bf));
+ const mk=(suffix,title)=>{
+  const ids=ALL.filter(i=>i!="naive"&&SHOW.has(i)),f=i=>i=="ieso"?"ieso"+suffix:i+suffix;
+  let set=rows.filter(r=>ids.every(i=>r[f(i)]!=null)),note="";
+  const per=i=>(set&&set.length?set:rows).filter(r=>r[f(i)]!=null);
+  if(!set.length){set=null;note=" (no hour has every selected series yet, so each is scored on its own hours)"}
+  const R=ids.map(i=>{const e=per(i);return[NAME(i),e.length,e.length?e.reduce((s,r)=>s+Math.abs(r[f(i)]-r.actual),0)/e.length:null,
+   e.length?100*e.reduce((s,r)=>s+Math.abs(r[f(i)]-r.actual)/r.actual,0)/e.length:null]});
+  return`<h3>${title}</h3>`+(R.some(r=>r[1])?table(["Forecast","Hours scored","Avg error (MW)","Avg error (%)"],R,[2,3])+(note?`<p>${note}</p>`:""):"<p>Nothing to score yet: results appear as hours pass and the IESO publishes the actual demand.</p>")};
+ $("live").innerHTML=mk("_n","Next-hour forecasts (made an hour ahead)")+mk("_h","This-hour forecasts");
  const D=L.slice(-72);
- if(D.length)plot($("cr"),D.map((_,i)=>i),[{ys:D.map(r=>r.actual),color:css("--fg")},{ys:D.map(r=>r.pn),color:COL.gb},{ys:D.map(r=>r.pp),color:COL.poly}],
-  {xf:(x,j)=>D[j].t.slice(5,13).replace("T"," ")+"h"});
- $("recentNote").textContent="Dark = actual demand. Orange = gradient boosting's next-hour prediction. Blue = polynomial.";
- const A=window.ARCH||[],B=[...Array(7)].map(()=>({g:[],p:[]}));
- A.forEach(a=>{const t0=Date.parse(a.u0+":00Z");a.gb.forEach((v,h)=>{const y=act[new Date(t0+h*36e5).toISOString().slice(0,13)+":00"];
-  if(y==null)return;const b=B[Math.min(6,Math.floor(h/24))];b.g.push(Math.abs(v-y));b.p.push(Math.abs(a.pp[h]-y))})});
- const avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null,rows=B.map((b,i)=>[`Day ${i+1}`,b.g.length,avg(b.g),avg(b.p)]);
- if(rows.some(r=>r[1]>0)){$("lead").innerHTML=table(["Days ahead","Hours scored","Gradient boosting (MW)","Polynomial (MW)"],rows,[2,3]);
-  const xs=rows.map((_,i)=>i+1);plot($("cl"),xs,[{ys:rows.map(r=>r[2]),color:COL.gb,dots:true},{ys:rows.map(r=>r[3]),color:COL.poly,dots:true}],{xf:x=>"Day "+Math.round(x),nt:7})}
- else{$("lead").innerHTML="<p>The site saves one 7-day forecast per day. Once a saved forecast's hours have happened, this table fills in (the first results appear after a day, the full 7 days after a week).</p>";$("cl").style.display="none"}}
+ if(D.length){const ids=ALL.filter(i=>i!="naive"&&SHOW.has(i)),f=i=>i+"_n";
+  plot($("cr"),D.map((_,i)=>i),[{ys:D.map(r=>r.actual),color:css("--fg")},...ids.map(i=>({ys:D.map(r=>r[f(i)]),color:COL(i)}))],
+   {xf:(x,j)=>D[j].t.slice(5,13).replace("T"," ")+"h"})}
+ const A=window.ARCH||[],act={};L.forEach(r=>{if(r.actual!=null)act[r.u]=r.actual});
+ const ids=ALL.filter(i=>i!="naive"&&SHOW.has(i)),B=[...Array(7)].map(()=>Object.fromEntries(ids.map(i=>[i,[]])));
+ A.forEach(a=>{const t0=Date.parse(a.u0+":00Z");for(let h=0;h<168;h++){const y=act[new Date(t0+h*36e5).toISOString().slice(0,13)+":00"];if(y==null)continue;
+  ids.forEach(i=>{const v=i=="ieso"?(a.ieso||[])[h]:((a.m||{})[i]||[])[h];if(v!=null)B[Math.floor(h/24)][i].push(Math.abs(v-y))})}});
+ const avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:null,tb=B.map((b,d)=>[`Day ${d+1}`,...ids.map(i=>avg(b[i]))]);
+ if(tb.some(r=>r.slice(1).some(v=>v!=null))){
+  $("lead").innerHTML=table(["Days ahead",...ids.map(i=>NAME(i)+" (MW)")],tb,ids.map((_,k)=>k+1));
+  plot($("cl"),[1,2,3,4,5,6,7],ids.map((i,k)=>({ys:tb.map(r=>r[k+1]),color:COL(i),dots:true})),{xf:x=>"Day "+Math.round(x),nt:7});$("cl").style.display="block"}
+ else{$("lead").innerHTML="<p>The site saves one 7-day forecast per day. Once a saved forecast's hours have happened, this table fills in: the first results appear after a day, the full 7 days after a week.</p>";$("cl").style.display="none"}}
 
 /* ---------- 3. current forecasts ---------- */
 function sideBySide(){
- const F=window.FC;if(!F||!F.u.length)return;
- plot($("cs"),F.u.map((_,i)=>i),[{ys:F.pred,color:COL.gb},{ys:F.pp,color:COL.poly}],{nt:8,
-  xf:(x,j)=>DOW[new Date(F.t[j].slice(0,10)+"T12:00:00").getDay()]+" "+F.t[j].slice(11,13)+"h"})}
-function render(){backtest();liveTables();sideBySide()}
-addEventListener("resize",render);render();
+ const F=window.FC;if(!F||!F.u.length||!F.m)return;
+ const S=MIDS.filter(i=>SHOW.has(i)&&F.m[i]).map(i=>({ys:F.m[i],color:COL(i)}));
+ if(SHOW.has("ieso")&&F.ieso)S.push({ys:F.ieso,color:IESO.c});
+ if(S.length)plot($("cs"),F.u.map((_,i)=>i),S,{nt:8,xf:(x,j)=>DOW[new Date(F.t[j].slice(0,10)+"T12:00:00").getDay()]+" "+F.t[j].slice(11,13)+"h"})}
+
+function render(){banner();backtest();liveSection();sideBySide()}
+$("incl").onchange=render;legend();addEventListener("resize",render);render();
 </script></main></body></html>

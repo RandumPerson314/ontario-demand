@@ -1,31 +1,14 @@
-"""Polynomial (ridge) model: fit it, and export its coefficients for docs/polynomial.html."""
+"""Export the weather-only polynomial as plain numbers for docs/polynomial.html."""
 import json
 
 import holidays
 import numpy as np
-from sklearn.compose import ColumnTransformer
-from sklearn.linear_model import RidgeCV
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 
-from features import BASE_TEMP, CITIES, POLY_CORE, POLY_FEATURES, POLY_LINEAR
-
-DEGREE = 3
-
-
-def fit_poly(X, y):
-    model = make_pipeline(
-        ColumnTransformer([
-            ("poly", make_pipeline(StandardScaler(),
-                                   PolynomialFeatures(DEGREE, include_bias=False)), POLY_CORE),
-            ("lin", "passthrough", POLY_LINEAR)]),
-        StandardScaler(),
-        RidgeCV(alphas=np.logspace(-2, 3, 12)))
-    return model.fit(X[POLY_FEATURES], y)
+from features import BASE_TEMP, CITIES, POLY_CORE, POLY_LINEAR
 
 
 def export_poly(model, F, path="docs/poly_model.js"):
-    """Write the fitted polynomial as plain numbers the page can evaluate in the browser."""
+    """model: the fitted scikit-learn pipeline from fit_poly (weather-only variant)."""
     pre = model.named_steps["columntransformer"]
     sc2 = model.named_steps["standardscaler"]
     ridge = model.named_steps["ridgecv"]

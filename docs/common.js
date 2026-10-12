@@ -16,3 +16,61 @@ function plot(c,xs,S,o={}){
  if(o.mark!=null){g.strokeStyle=css("--fg");g.lineWidth=1.5;g.setLineDash([4,3]);g.beginPath();g.moveTo(X(o.mark),T);g.lineTo(X(o.mark),h-Bt);g.stroke();g.setLineDash([])}
  if(o.dot){g.fillStyle=css("--fg");g.beginPath();g.arc(X(o.dot[0]),Y(o.dot[1]),5,0,7);g.fill()}
  c._m={x0,x1,Lm,R,w}}
+
+/* ---------- model registry (colours, names, plain-language descriptions) ---------- */
+const MODELS={
+ gbm:{n:"Gradient boosting + recent demand",c:"#d9480f",page:"dashboard.html",demand:true,
+  d:"A team of hundreds of small decision trees, each one correcting the mistakes of the ones before it. Besides the weather and the calendar it is shown recent demand: the last few hours for the this-hour and next-hour predictions, and demand from a week or two earlier for the 7-day forecast."},
+ gbm0:{n:"Gradient boosting, weather only",c:"#f08c00",page:"gbm_weather.html",demand:false,
+  d:"The same decision-tree technique, but it is never shown any demand numbers at all, only the weather and the calendar. Comparing it with its sibling shows how much knowing recent demand really helps."},
+ poly:{n:"Polynomial + recent demand",c:"#1971c2",page:"poly_demand.html",demand:true,
+  d:"One fixed formula (a polynomial: sums of products of the inputs) fitted to history. Its terms combine temperature, time of day, sunshine and workday-or-not, and it also has terms for recent demand, so it can follow how demand has been running lately."},
+ poly0:{n:"Polynomial, weather only",c:"#4dabf7",page:"polynomial.html",demand:false,
+  d:"The same kind of formula using only the weather and the calendar, never recent demand. Its full equation and a set of sliders are on its page."},
+ nn:{n:"Neural network + recent demand",c:"#2f9e44",page:"nn_demand.html",demand:true,
+  d:"A small neural network (layers of weighted sums with a bend between them), trained with PyTorch and averaged over several training runs. It is shown recent demand as well as the weather and the calendar."},
+ nn0:{n:"Neural network, weather only",c:"#74b816",page:"nn_weather.html",demand:false,
+  d:"The same kind of neural network, but with no demand numbers as input, only the weather and the calendar."}};
+const IESO={n:"IESO official forecast",c:"#7048e8"},MIDS=Object.keys(MODELS);
+
+/* ---------- freshness / problem banner ---------- */
+function banner(){
+ const M=window.LOG_META||{},el=document.getElementById("banner");if(!el)return;
+ const age=M.updated?(Date.now()-Date.parse(M.updated))/6e4:null,bad=(M.status||[]).filter(s=>!s.ok);let msg="";
+ if(age==null)msg="No update has run yet, so there is no data to show.";
+ else if(age>35)msg="The data was last updated "+(age<120?Math.round(age)+" minutes":Math.round(age/60)+" hours")+" ago, so the automatic update is running late. Numbers on this page may be out of date.";
+ if(bad.length)msg+=(msg?" ":"")+"Problems with data sources: "+bad.map(s=>s.name+" ("+s.detail+")").join("; ")+".";
+ el.style.display=msg?"block":"none";el.textContent=msg}
+
+/* ---------- the five cards, for any model id ---------- */
+function cardsFor(id){
+ const L=window.LOG||[],M=window.LOG_META||{},F=window.FC,H=36e5,t0=Math.floor(Date.now()/H)*H;
+ const key=ms=>new Date(ms).toISOString().slice(0,13)+":00",
+ tl=ms=>new Date(ms).toLocaleString("sv-SE",{timeZone:"America/Toronto"}).slice(0,13)+":00",
+ arr=F&&(F.m?F.m[id]:id=="gbm"?F.pred:null),fcAt=k=>{const i=F?F.u.indexOf(k):-1;return i<0||!arr?null:arr[i]};
+ const pick=(k,fields)=>{const r=L.find(r=>r.u==k);if(r)for(const[f,s]of fields)if(r[f]!=null)return[r[f],s];
+  const v=fcAt(k);return v==null?[null,""]:[v,"7-day forecast run"]};
+ const show=(b,t,v,s,ms)=>{$(b).textContent=v==null?"-":MW(v);$(t).textContent=tl(ms).slice(5)+" Toronto time"+(v==null?" · not available yet":" · "+s)};
+ const[a,as]=pick(key(t0),[[id+"_h","made this hour"],[id+"_n","made an hour ahead"]]),[b,bs]=pick(key(t0+H),[[id+"_n","made this hour"]]);
+ show("p","pt",a,as,t0);show("n","nt",b,bs,t0+H);
+ /* actual demand so far THIS hour: only if the reading really is for the current Toronto hour */
+ if(M.live_mw!=null&&lab(M.live_t)==tl(t0)){$("l").textContent=MW(M.live_mw);
+  $("lt").textContent=tl(t0).slice(5)+" hour · average of "+M.live_n+" readings, latest at "+M.live_last+
+   (a!=null?" · prediction is "+((100*(a/M.live_mw-1)).toFixed(1)).replace(/^(\d)/,"+$1")+"%":"")}
+ else{$("l").textContent="-";$("lt").textContent=M.live_mw!=null?"waiting for the new hour's first readings (newest data is for the "+lab(M.live_t).slice(11)+" hour)":"no reading yet"}
+ /* last COMPLETED hour = the hour before the current one */
+ const rp=L.find(r=>r.u==key(t0-H));
+ if(rp&&rp.actual!=null){$("a").textContent=MW(rp.actual);$("at").textContent=tl(t0-H).slice(5)+" Toronto time"+(rp[id+"_h"]!=null?" · model said "+MW(rp[id+"_h"]):"")}
+ else{$("a").textContent="-";$("at").textContent=tl(t0-H).slice(5)+" hour · not published yet"}
+ const wk=L.slice(-168).filter(r=>r.actual!=null&&r[id+"_h"]!=null),live=wk.filter(r=>!r.bf),use=live.length>=12?live:wk;
+ if(use.length){const e=use.map(r=>r[id+"_h"]-r.actual),mae=e.reduce((s,x)=>s+Math.abs(x),0)/e.length;
+  $("m").textContent="±"+Math.round(mae)+" MW";
+  $("mt").textContent="this-hour predictions, "+use.length+(use===live?" live":" retrospective")+" hours, "+(100*e.reduce((s,x,i)=>s+Math.abs(x)/use[i].actual,0)/e.length).toFixed(2)+"% error"}
+ else{$("m").textContent="-";$("mt").textContent="not enough scored hours yet"}}
+
+/* ---------- daily peak/low table for a 7-day forecast array ---------- */
+function dailyTable(F,arr){
+ const D={};F.t.forEach((t,i)=>(D[t.slice(0,10)]=D[t.slice(0,10)]||[]).push(i));
+ return"<table><tr><th>Day</th><th>Peak</th><th>At</th><th>Lowest</th><th>Avg temp</th></tr>"+Object.entries(D).map(([d,ix])=>{
+  const pk=ix.reduce((a,i)=>arr[i]>arr[a]?i:a),mn=Math.min(...ix.map(i=>arr[i])),tp=ix.reduce((s,i)=>s+F.temp[i],0)/ix.length;
+  return`<tr><td>${DOW[new Date(d+"T12:00:00").getDay()]} ${d.slice(5)}${ix.length<24?" (partial)":""}</td><td>${MW(arr[pk])}</td><td>${F.t[pk].slice(11,13)}:00</td><td>${MW(mn)}</td><td>${tp.toFixed(1)} °C</td></tr>`}).join("")+"</table>"}

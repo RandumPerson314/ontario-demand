@@ -27,8 +27,8 @@ canvas.sm{height:150px}.sg{display:grid;grid-template-columns:repeat(3,1fr);gap:
 <div>
 <div class="card"><h1>Polynomial model explorer</h1>
 <div class="big" id="out"></div><p id="sub"></p>
-<p>Polynomial model fitted on IESO demand + Open-Meteo weather. Move the sliders, or click the heatmap to set temperature and hour.</p>
-<p style="margin-top:10px"><button id="liveBtn" onclick="live()">Predict current power usage</button></p><p id="liveMsg"></p></div>
+<p>This page opens on the prediction for right now, using live weather. Move the sliders to explore, click the heatmap to set a temperature and hour, or press the button to reload current conditions.</p>
+<p style="margin-top:10px"><button id="liveBtn" onclick="live()">Refresh with current weather</button></p><p id="liveMsg">Loading current conditions from Open-Meteo...</p></div>
 <div class="card"><h3>What moves demand most, starting from your settings?</h3>
 <p>Each bar spans the lowest to highest demand reached as that one factor sweeps its whole range, including dips or peaks in between (others held fixed).</p><div id="tor"></div></div>
 <div class="grid"><div class="card"><h3>Demand vs temperature</h3><canvas id="c1"></canvas></div>
@@ -203,7 +203,7 @@ function pdgraphs(){
  const all=R.flatMap(r=>r.ys),yr=document.getElementById("shy").checked?[Math.min(...all),Math.max(...all)]:null;
  R.forEach(r=>chart(PDC[r.k],r.xs,r.ys,S[r.k],x=>String(r.xf(x)).replace(/ .*/,""),yr))}
 function logchart(){
- const c=document.getElementById("c4"),L=(window.LOG||[]).filter(r=>r.pp!=null).map(r=>({...r,pred:r.pp})),msg=document.getElementById("logMsg"),[g,w,h]=setup(c);
+ const c=document.getElementById("c4"),L=(window.LOG||[]).filter(r=>r.poly0_h!=null||r.poly0_n!=null).map(r=>({...r,pred:r.poly0_h!=null?r.poly0_h:r.poly0_n})),msg=document.getElementById("logMsg"),[g,w,h]=setup(c);
  if(!L.length){msg.textContent="No prediction log yet: the first automatic update hasn't run.";return}
  const D=L.slice(-168),n=D.length,ys=D.flatMap(r=>[r.pred,r.actual]).filter(v=>v!=null),
  lo=Math.min(...ys),hi=Math.max(...ys),p=(hi-lo)*.08||1,a=lo-p,b=hi+p,Lm=54,R=10,T=8,Bt=26;
@@ -223,4 +223,5 @@ function loadLog(){const s=document.createElement("script");s.src="demand_log.js
 setInterval(loadLog,300000);
 SL.forEach(([k])=>set(k,S[k],false));
 render();addEventListener("resize",render);
+live();   /* show the prediction for right now as soon as the page opens */
 </script></body></html>
