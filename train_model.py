@@ -1,6 +1,11 @@
 """Train every model locally:  python train_model.py     (needs: pip install -r requirements-train.txt)
 
-Creates model/<family>_<variant>.joblib and docs/{week_model,poly_model,backtest}.js.
+For each of the 12 model variants it:
+  * tries the population-weighted temperature alone AND with every city's own temperature added,
+    and keeps the per-city version only if it lowers the validation error by at least 0.5%;
+  * (neural networks) tries five network shapes and keeps the best;
+then refits on all the data and exports the model for the website.
+Creates model/<family>_<variant>.joblib and docs/{model_<family>,explain_common,model_info,backtest}.js.
 The neural networks use the GPU automatically if PyTorch can see one."""
 import json
 import os
@@ -9,71 +14,63 @@ import joblib
 import numpy as np
 from sklearn.metrics import mean_absolute_error as mae
 
-from features import (FAMILIES, WEEK_FEATURES, base_col, feature_list, fetch_archive, fetch_demand,
-                      make_features, variants)
-from models import HOURLY_PARAMS, WEEK_PARAMS, Predictor, fit_gbm, fit_nn, fit_poly
-from poly_model import export_poly
+from export_models import export_common, export_model
+from features import (FAMILIES, base_col, feature_list, fetch_archive, fetch_demand, make_features,
+                      variants)
+from models import (HOURLY_PARAMS, WEEK_PARAMS, Predictor, fit_nn, fit_poly, gbm_fit, gbm_select,
+                    nn_select, poly_select)
 
 YEARS = range(2019, 2027)          # last year may be partial; that's fine
 TEST_FROM = 2025                   # years >= this are never used to choose any settings
+FINAL_SEEDS = 5                    # neural networks: size of the final ensemble
+
+
+def _data(F, feats, base):
+    sub = F.dropna(subset=feats + ["demand"])
+    y = sub["demand"] - (sub[base] if base else 0.0)        # predict the change from a known demand value
+    ix = sub.index.year
+    return sub, y, sub[ix < TEST_FROM - 1], sub[ix == TEST_FROM - 1], sub[ix < TEST_FROM], sub[ix >= TEST_FROM]
 
 
 def fit_variant(F, fid, v):
     """Returns (final model trained on everything, backtest model trained before TEST_FROM)."""
-    kind, feats, base = FAMILIES[fid]["kind"], feature_list(fid, v), base_col(fid, v)
-    sub = F.dropna(subset=feats + ["demand"])
-    y = sub["demand"] - (sub[base] if base else 0.0)        # predict the change from a known demand value
-    train, val = sub[sub.index.year < TEST_FROM - 1], sub[sub.index.year == TEST_FROM - 1]
-    trv, test = sub[sub.index.year < TEST_FROM], sub[sub.index.year >= TEST_FROM]
-    print(f"\n=== {fid} / {v}: {len(feats)} inputs, rows train {len(train)}, val {len(val)}, test {len(test)}")
+    kind, base = FAMILIES[fid]["kind"], base_col(fid, v)
+    params, cap = (HOURLY_PARAMS, 1500) if v in ("h1", "h2") else (WEEK_PARAMS, 700)
+    print(f"\n=== {fid} / {v}")
+    chosen, cfg = {}, None
+    for city in (False, True):
+        feats = feature_list(fid, v, city)
+        sub, y, train, val, trv, test = _data(F, feats, base)
+        a, b = train[feats], val[feats]
+        if kind == "gbm":
+            sel = gbm_select(train, y[train.index], val, y[val.index], params, cap, feats)
+        elif kind == "poly":
+            sel = poly_select(train, y[train.index], val, y[val.index], feats)
+        else:
+            sel = nn_select(a.values, y[train.index].values, b.values, y[val.index].values, cfg=cfg)
+            cfg = sel["cfg"]
+        chosen[city] = dict(sel=sel, feats=feats)
+        label = "with each city's own temperature" if city else "population-weighted temperature"
+        print(f"   {label:34s}: {len(feats)} inputs, validation error {sel['val']:.0f} MW")
+    use_city = chosen[True]["sel"]["val"] < chosen[False]["sel"]["val"] * 0.995
+    sel, feats = chosen[use_city]["sel"], chosen[use_city]["feats"]
+    print("   -> using " + ("each city's own temperature" if use_city else "the population-weighted temperature"))
 
+    sub, y, train, val, trv, test = _data(F, feats, base)
     if kind == "gbm":
-        params, cap = (HOURLY_PARAMS, 1500) if v in ("h1", "h2") else (WEEK_PARAMS, 700)
-        m2, final = fit_gbm(train, y[train.index], val, y[val.index], params, cap, feats,
-                            [(trv, y[trv.index]), (sub, y)])
+        m2, final = (gbm_fit(d, y[d.index], feats, params, sel["ntrees"]) for d in (trv, sub))
     elif kind == "poly":
         m2, final = fit_poly(trv, y[trv.index], feats), fit_poly(sub, y, feats)
     else:
-        _, epochs = fit_nn(train[feats], y[train.index], val[feats], y[val.index])
-        print(f"   best number of epochs: {epochs}")
-        m2, _ = fit_nn(trv[feats], y[trv.index], epochs=epochs)
-        final, _ = fit_nn(sub[feats], y, epochs=epochs)
+        print(f"   final networks: shape {sel['cfg']['hidden']}, {sel['epochs']} epochs, {FINAL_SEEDS} seeds")
+        m2 = fit_nn(trv[feats].values, y[trv.index].values, epochs=sel["epochs"], seeds=FINAL_SEEDS, cfg=sel["cfg"])[0]
+        final = fit_nn(sub[feats].values, y.values, epochs=sel["epochs"], seeds=FINAL_SEEDS, cfg=sel["cfg"])[0]
 
-    bt, fin = Predictor(m2, feats, base), Predictor(final, feats, base)
+    info = dict(city=bool(use_city), val_base=round(chosen[False]["sel"]["val"], 1),
+                val_city=round(chosen[True]["sel"]["val"], 1))
+    bt, fin = Predictor(m2, feats, base, info), Predictor(final, feats, base, info)
     print(f"   TEST average error {mae(test['demand'], bt.predict(test)):.0f} MW")
     return fin, bt
-
-
-def export_trees(model, feats, X_check, path):
-    """Write the trees as JavaScript so the page can evaluate the model in the browser."""
-    base = float(np.ravel(model._baseline_prediction)[0])
-    trees = []
-    for it in model._predictors:
-        nd = it[0].nodes
-        trees.append(dict(
-            f=np.where(nd["is_leaf"] == 1, -1, nd["feature_idx"]).astype(int).tolist(),
-            t=[float(v) for v in nd["num_threshold"]],   # full precision: rounding flips splits
-            l=nd["left"].astype(int).tolist(), r=nd["right"].astype(int).tolist(),
-            v=[round(float(v), 3) for v in nd["value"]]))
-
-    def py_predict(x):                                 # same algorithm as the JavaScript
-        s = base
-        for T in trees:
-            n = 0
-            while T["f"][n] >= 0:
-                n = T["l"][n] if x[T["f"][n]] <= T["t"][n] else T["r"][n]
-            s += T["v"][n]
-        return s
-
-    Xc = X_check[feats].iloc[::max(1, len(X_check) // 100)].head(100)
-    diff = np.abs(np.array([py_predict(r) for r in Xc.values]) - model.predict(Xc)).max()
-    print(f"tree export self-check: max difference {diff:.3f} MW")
-    if diff > 2:
-        print("WARNING: exported trees do not match the model; the explorer would be wrong.")
-    with open(path, "w") as fh:
-        fh.write("window.WM=" + json.dumps(dict(features=feats, base=base, trees=trees),
-                                            separators=(",", ":")) + ";")
-    print(f"wrote {path} ({os.path.getsize(path) / 1e6:.1f} MB)")
 
 
 def score(y, p):
@@ -115,9 +112,14 @@ if __name__ == "__main__":
             final[(fid, v)], bt[(fid, v)] = fit_variant(F, fid, v)
             joblib.dump(final[(fid, v)], f"model/{fid}_{v}.joblib", compress=3)
 
-    export_trees(final[("gbm", "wk")].model, WEEK_FEATURES, F.dropna(subset=WEEK_FEATURES + ["demand"]),
-                 "docs/week_model.js")
-    export_poly(final[("poly0", "all")].model, F, "docs/poly_model.js")
+    print()
+    export_common(F)
+    for fid in FAMILIES:                               # each model's 7-day variant powers its page's explorer
+        p = final[(fid, "wk" if FAMILIES[fid]["demand"] else "all")]
+        export_model(fid, p, F.dropna(subset=p.feats), f"docs/model_{fid}.js")
+    info = {fid: {v: final[(fid, v)].info for v in variants(fid)} for fid in FAMILIES}
+    with open("docs/model_info.js", "w") as fh:
+        fh.write("window.MI=" + json.dumps(info) + ";")
     with open("docs/backtest.js", "w") as fh:
         fh.write("window.BT=" + json.dumps(backtest(F, bt)) + ";")
-    print("\nsaved model/*.joblib and docs/week_model.js, poly_model.js, backtest.js")
+    print("\nsaved model/*.joblib and docs/model_*.js, explain_common.js, model_info.js, backtest.js")

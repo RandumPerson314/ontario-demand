@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 import features as ft
-from features import (FAMILIES, TORONTO, WEEK_FEATURES, fetch_adequacy, fetch_demand, fetch_live,
+from features import (FAMILIES, TORONTO, fetch_adequacy, fetch_demand, fetch_live,
                       fetch_live_demand, fetch_multiday, make_features, merge_demand, variants)
 
 LOG, FC_FILE, ARCH = "docs/demand_log.js", "docs/forecast.js", "docs/forecast_archive.js"
@@ -134,6 +134,12 @@ for fid in FIDS:
 for idx, key in ((now, "ieso_h"), (nxt, "ieso_n")):    # IESO's forecast, captured when it was a genuine forecast
     if idx in ieso.index and idx in F.index and not np.isnan(ieso[idx]) and get_row(idx)[key] is None:
         log[ukey(idx)][key] = round(float(ieso[idx]), 1)
+for idx in win.index:                                  # past hours: the IESO's own published projection (its chart feed keeps ~5 days)
+    if idx < now and idx in proj.index and not np.isnan(proj[idx]):
+        r = get_row(idx)
+        for key in ("ieso_h", "ieso_n"):
+            if r[key] is None:
+                r[key] = round(float(proj[idx]), 1)
 
 for r in log.values():                                 # actuals: official hourly file first, then the live feed
     ts = pd.Timestamp(r["u"])
@@ -153,6 +159,8 @@ try:   # average of the 5-minute readings so far in the current IESO hour (IESO 
 except Exception as e:
     note("IESO 5-minute readings", False, e)
 meta["status"] = status
+meta["ieso_hours"] = sum(1 for r in rows if r.get("ieso_n") is not None)
+meta["ieso_source"] = ("live feed projection" if len(proj) else "") + (" + adequacy report" if len(adeq) else "") or "none"
 write_log(rows, meta)
 cur = next((r for r in rows if r["u"] == ukey(now)), None)
 print("this hour:", {k: cur[k] for k in KEYS if cur and cur[k] is not None} if cur else None)
@@ -162,14 +170,14 @@ prev_fc = read_js(FC_FILE, "window.FC=")
 if prev_fc and prev_fc.get("u") and prev_fc["u"][0] == ukey(now) and "m" in prev_fc:
     print("7-day forecast already written for this hour")
 else:
-    need = sorted({c for fid in FIDS for c in model_for(fid, "wk").feats})
-    fc = F.loc[now:now + pd.DateOffset(hours=167)].dropna(subset=need)
+    names = sorted({c for fid in FIDS for c in model_for(fid, "wk").feats})     # every input any model's explorer needs
+    fc = F.loc[now:now + pd.DateOffset(hours=167)].dropna(subset=names)
     if len(fc):
         M = {fid: [round(float(p)) for p in model_for(fid, "wk").predict(fc)] for fid in FIDS}
         off = [None if i not in ieso.index or np.isnan(ieso[i]) else round(float(ieso[i])) for i in fc.index]
         out = dict(updated=meta["updated"], u=[ukey(i) for i in fc.index], t=[local_label(i) for i in fc.index],
                    pred=M["gbm"], m=M, ieso=off, temp=[round(float(v), 1) for v in fc["temp"]],
-                   X=[[round(float(v), 4) for v in r] for r in fc[WEEK_FEATURES].values])
+                   names=names, X=[[round(float(v), 4) for v in r] for r in fc[names].values])
         with open(FC_FILE, "w") as fh:
             fh.write("window.FC=" + json.dumps(out, separators=(",", ":")) + ";")
         print(f"forecast: {len(fc)} hours, {out['t'][0]} to {out['t'][-1]} Toronto time")

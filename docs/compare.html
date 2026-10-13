@@ -13,6 +13,9 @@ td.best{font-weight:700;color:var(--ac)}.lg label{display:inline-flex;align-item
 <p>Six models predict Ontario's electricity demand, and the IESO (the grid operator) publishes its own forecast. They are compared here on the same hours, for the two things this site predicts: the <b>next hour</b> and the <b>next 7 days</b>. A "naive" guess (repeat an earlier hour) is included as a yardstick: a model that can't beat it isn't adding much.</p>
 <div class="panel"><b>Show on the graphs and in the live tables:</b><div class="lg" id="lg"></div></div>
 
+<div class="panel"><h2>IESO forecast status</h2><div id="iesoStatus"></div>
+<p>The IESO's forecast is saved every time the site updates, then scored against actual demand like the models. Its chart feed also keeps about five days of the IESO's own past projections, which are used immediately so there is something to compare from day one.</p></div>
+
 <div class="panel"><h2>1. Backtest on held-out history</h2>
 <p id="btinfo">Loading...</p><div id="bt"></div>
 <div class="two"><div><h3>Next-hour forecast: average error by hour of day</h3><canvas id="bh1"></canvas></div>
@@ -92,6 +95,16 @@ function sideBySide(){
  if(SHOW.has("ieso")&&F.ieso)S.push({ys:F.ieso,color:IESO.c});
  if(S.length)plot($("cs"),F.u.map((_,i)=>i),S,{nt:8,xf:(x,j)=>DOW[new Date(F.t[j].slice(0,10)+"T12:00:00").getDay()]+" "+F.t[j].slice(11,13)+"h"})}
 
-function render(){banner();backtest();liveSection();sideBySide()}
+function iesoStatus(){
+ const M=window.LOG_META||{},L=window.LOG||[],n=L.filter(r=>r.ieso_n!=null).length,sc=L.filter(r=>r.ieso_n!=null&&r.actual!=null).length,
+ st=(M.status||[]).filter(s=>/IESO/.test(s.name)),F=window.FC,fut=F&&F.ieso?F.ieso.filter(v=>v!=null).length:0;
+ let h=n?`<p class="verdict"><b>${n}</b> hours of IESO forecasts are saved (${sc} already scored against actual demand), plus <b>${fut}</b> upcoming hours in the 7-day window.${M.ieso_source?" Source: "+M.ieso_source+".":""}</p>`
+  :`<p class="verdict"><b>No IESO forecast has been captured yet.</b> The reason is shown below; it appears on every graph and table here as soon as a source works.</p>`;
+ h+=st.length?"<table>"+st.map(s=>`<tr><td>${s.ok?"✓":"✗"} ${s.name}</td><td style="text-align:left">${s.detail}</td></tr>`).join("")+"</table>":"<p>No source status recorded yet (the site has not updated since this feature was added).</p>";
+ $("iesoStatus").innerHTML=h}
+let auto=true;
+function render(){
+ if(auto&&(window.LOG||[]).length){auto=false;if(window.LOG.filter(r=>r.actual!=null&&!r.bf&&r.ieso_n!=null).length<24)$("incl").value="all"}   // few live hours yet: include the IESO's past projections
+ banner();iesoStatus();backtest();liveSection();sideBySide()}
 $("incl").onchange=render;legend();addEventListener("resize",render);render();
 </script></main></body></html>

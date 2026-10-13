@@ -23,6 +23,9 @@ VARS = {"temperature_2m": "temp", "apparent_temperature": "feels",
         "shortwave_radiation": "solar", "precipitation": "precip", "snowfall": "snow"}
 
 WEATHER = list(VARS.values())
+CITY_COLS = [f"ct_{c}" for c in CITIES]                         # each city's own temperature (not population-weighted)
+HOUR_ONEHOT = [f"hr_{h}" for h in range(24)]                    # one-hot calendar columns, used by the neural networks
+MONTH_ONEHOT = [f"mo_{m}" for m in range(1, 13)]
 TEMP_DERIVED = ["hdd", "cdd", "temp_lag1", "temp_lag3", "temp_lag24", "temp_roll24",
                 "temp_roll72", "dtemp3"]
 CALENDAR = ["hour", "dow", "month", "doy", "hol", "hol_before", "hol_after", "xmas", "nonwork"]
@@ -65,19 +68,20 @@ def variants(fid):
     return ["h1", "h2", "wk"] if FAMILIES[fid]["demand"] else ["all"]
 
 
-def feature_list(fid, v):
+def feature_list(fid, v, city=False):
+    """Inputs for a model. city=True adds every city's own temperature as separate inputs."""
     fam = FAMILIES[fid]
     dem = DEMAND_COLS[v] if fam["demand"] else []
     if fam["kind"] == "gbm":
-        return WEATHER + TEMP_DERIVED + DEMAND_COLS[v] + CALENDAR if fam["demand"] else GBM0_FEATURES
-    return (POLY_FEATURES if fam["kind"] == "poly" else NN_BASE) + dem
+        base = WEATHER + TEMP_DERIVED + DEMAND_COLS[v] + CALENDAR if fam["demand"] else GBM0_FEATURES
+    else:
+        base = (POLY_FEATURES if fam["kind"] == "poly" else NN_BASE + HOUR_ONEHOT + MONTH_ONEHOT) + dem
+    return base + (CITY_COLS if city else [])
 
 
 def base_col(fid, v):
     return BASE_LAG[v] if FAMILIES[fid]["demand"] else None
 
-
-WEEK_FEATURES = feature_list("gbm", "wk")          # what the website explorer evaluates in the browser
 
 _HOL = pd.to_datetime(list(holidays.Canada(subdiv="ON", years=range(2018, 2034)).keys()))
 
@@ -112,7 +116,7 @@ def _finish(acc):
 def fetch_archive(years, cache="cache"):
     """Historical weather (UTC index), cached per city-year. Complete years only are cached."""
     os.makedirs(cache, exist_ok=True)
-    now, acc = pd.Timestamp.now(), None
+    now, acc, ct = pd.Timestamp.now(), None, {}
     for name, (la, lo, wt) in CITIES.items():
         parts = []
         for y in years:
@@ -133,8 +137,9 @@ def fetch_archive(years, cache="cache"):
             time.sleep(10)
         h = pd.concat(parts).drop_duplicates("time").set_index("time")
         h = h[list(VARS)].interpolate(limit=3) * wt
+        ct[f"ct_{name}"] = h["temperature_2m"] / wt
         acc = h if acc is None else acc.add(h)
-    return _finish(acc)
+    return pd.concat([_finish(acc), pd.DataFrame(ct)], axis=1)
 
 
 LIVE_CACHE = "data/weather_live.csv"
@@ -151,11 +156,12 @@ def fetch_live(forecast_days=9):
             "hourly": ",".join(VARS), "past_days": 14, "forecast_days": forecast_days,
             "timezone": "GMT"}, tries=3, base_wait=15)
         d = d if isinstance(d, list) else [d]
-        acc = None
-        for x, c in zip(d, C):
+        acc, ct = None, {}
+        for x, c, name in zip(d, C, CITIES):
             h = _hourly(x, c[2])
+            ct[f"ct_{name}"] = h["temperature_2m"] / c[2]
             acc = h if acc is None else acc.add(h)
-        w = _finish(acc)
+        w = pd.concat([_finish(acc), pd.DataFrame(ct)], axis=1)
         os.makedirs("data", exist_ok=True)
         w.to_csv(LIVE_CACHE)
         LIVE_STATUS.update(ok=True, detail="fresh")
@@ -239,21 +245,23 @@ def fetch_multiday(csv):
         if tag(ds) == "DataSet":
             series[ds.get("Series")] = np.array([float(v.text) if v.text and v.text.strip() else np.nan
                                                  for v in ds.iter() if tag(v) == "Value"])
-    act, proj = series.get("Actual"), series.get("Projected")
+    pick = lambda *keys: next((v for k, v in series.items() if k and any(x in k.lower() for x in keys)), None)
+    act, proj = pick("actual"), pick("project", "forecast")
     if act is None:
-        raise RuntimeError("feed has no 'Actual' series")
-    t = pd.DatetimeIndex(start + pd.to_timedelta(np.arange(len(act)), unit="h"))
-    bases = {"est": t + pd.DateOffset(hours=5),
-             "local": t.tz_localize(TORONTO, ambiguous="NaT", nonexistent="shift_forward")
-                       .tz_convert("UTC").tz_localize(None)}
+        raise RuntimeError(f"feed has no 'Actual' series (found: {list(series)})")
 
-    def build(vals, name, shift):
-        idx = bases[name] + pd.DateOffset(hours=shift)
-        s = pd.Series(vals[:len(idx)], index=idx)
+    def build(vals, name, shift):                      # every series gets its own length and clock
+        t = pd.DatetimeIndex(start + pd.to_timedelta(np.arange(len(vals)), unit="h"))
+        if name == "est":
+            base = t + pd.DateOffset(hours=5)
+        else:
+            base = (t.tz_localize(TORONTO, ambiguous="NaT", nonexistent="shift_forward")
+                     .tz_convert("UTC").tz_localize(None))
+        s = pd.Series(vals, index=base + pd.DateOffset(hours=shift))
         return s[s.index.notna()]
 
     best = None
-    for name in bases:
+    for name in ("est", "local"):
         for shift in (-1, 0, 1):
             a = build(act, name, shift).dropna()
             common = a.index.intersection(csv.index)
@@ -266,7 +274,7 @@ def fetch_multiday(csv):
             raise RuntimeError("cannot calibrate the hourly feed (no overlap with the official hourly file)")
         c = json.load(open(CAL_FILE))
         best = (np.nan, c["name"], c["shift"], 0)
-    elif best[0] > 400:
+    elif best[0] > 700:
         raise RuntimeError(f"hourly feed disagrees with the official file (avg {best[0]:.0f} MW)")
     else:
         os.makedirs("data", exist_ok=True)
@@ -277,15 +285,12 @@ def fetch_multiday(csv):
                 info=f"clock={name}, shift={shift}h, matched {n} h to the official file (avg diff {err:.0f} MW)")
 
 
-ADEQUACY_URL = "https://reports-public.ieso.ca/public/Adequacy3/PUB_Adequacy3.xml"
+ADEQUACY_URLS = ["https://reports-public.ieso.ca/public/Adequacy3/PUB_Adequacy3.xml",
+                 "https://reports-public.ieso.ca/public/Adequacy2/PUB_Adequacy2.xml"]
 
 
-def fetch_adequacy():
-    """IESO's Adequacy Report: hourly forecast of Ontario demand for today and ~34 days ahead.
-    The XML layout is parsed tolerantly; returns (Series indexed by naive UTC hour start, note)."""
-    r = requests.get(ADEQUACY_URL, timeout=90)
-    r.raise_for_status()
-    root = ElementTree.fromstring(r.content)
+def _parse_adequacy(content):
+    root = ElementTree.fromstring(content)
     tag = lambda e: e.tag.split("}")[-1]
     date, system, groups = None, "", {}
     for el in root.iter():
@@ -294,7 +299,7 @@ def fetch_adequacy():
             date = el.get("DeliveryDate")[:10]
         if n == "DeliveryDate" and el.text and el.text.strip():
             date = el.text.strip()[:10]
-        elif n == "SystemName" and el.text:
+        elif n in ("SystemName", "ZoneName", "AreaName", "Zone", "Area") and el.text and el.text.strip():
             system = el.text.strip()
         else:
             kids = {tag(k): (k.text or "").strip() for k in el}
@@ -306,24 +311,52 @@ def fetch_adequacy():
                 except ValueError:
                     pass
 
-    def rank(key):
-        s, n = key[0].lower(), key[1].lower()
-        if "demand" not in n or any(x in n for x in ("peak", "zone", "east", "west", "market", "uncertain")):
-            return None
-        if s and "ontario" not in s:
-            return None
-        return (0 if "average" in n else 1 if "forecast" in n else 2, -len(groups[key]))
+    def series(key):
+        vals = {}
+        for d, h, mw in groups[key]:
+            vals.setdefault(pd.Timestamp(d) + pd.DateOffset(hours=h - 1 + 5), mw)   # hour-ending EST -> hour start UTC
+        return pd.Series(vals).sort_index()
 
-    cands = sorted((k for k in groups if rank(k) is not None), key=rank)
-    if not cands:
-        seen = ", ".join(f"{k[0] or '-'}/{k[1]}({len(v)})" for k, v in list(groups.items())[:8])
-        raise RuntimeError(f"no Ontario demand forecast recognised in the report; hourly groups seen: {seen}")
-    key = cands[0]
-    vals = {}
-    for d, h, mw in groups[key]:
-        vals.setdefault(pd.Timestamp(d) + pd.DateOffset(hours=h - 1 + 5), mw)   # hour-ending EST -> hour start UTC
-    s = pd.Series(vals).sort_index()
-    return s, f"used '{key[1]}' ({len(s)} hours, {s.index[0]:%m-%d} to {s.index[-1]:%m-%d})"
+    def tag_rank(n):
+        n = n.lower()
+        if "demand" not in n or any(x in n for x in ("peak", "market", "uncertain", "reserve", "capacity")):
+            return None
+        return 0 if "average" in n else 1 if "forecast" in n else 2
+
+    # 1) an Ontario-wide series
+    whole = [k for k in groups if tag_rank(k[1]) is not None and (not k[0] or "ontario" in k[0].lower() or "total" in k[0].lower())]
+    if whole:
+        key = min(whole, key=lambda k: (tag_rank(k[1]), -len(groups[k])))
+        s = series(key)
+        return s, f"used '{key[1]}' for {key[0] or 'Ontario'} ({len(s)} hours, {s.index[0]:%m-%d} to {s.index[-1]:%m-%d})"
+    # 2) the four forecast zones: add them up
+    zone_tags = {}
+    for k in groups:
+        if tag_rank(k[1]) is not None and k[0]:
+            zone_tags.setdefault(k[1], []).append(k)
+    for n, keys in sorted(zone_tags.items(), key=lambda kv: (tag_rank(kv[0]), -len(kv[1]))):
+        if len(keys) >= 3:
+            parts = pd.concat([series(k) for k in keys], axis=1, join="inner")
+            if len(parts):
+                s = parts.sum(axis=1)
+                return s, f"added {len(keys)} zones of '{n}' ({len(s)} hours, {s.index[0]:%m-%d} to {s.index[-1]:%m-%d})"
+    seen = ", ".join(f"{k[0] or '-'}/{k[1]}({len(v)})" for k, v in list(groups.items())[:10])
+    raise RuntimeError(f"no demand forecast recognised in the report; hourly groups seen: {seen or 'none'}")
+
+
+def fetch_adequacy():
+    """IESO's Adequacy Report: hourly demand forecast for today and up to ~34 days ahead
+    (published per forecast zone; the zones are added up). Returns (Series by naive UTC hour start, note)."""
+    errors = []
+    for url in ADEQUACY_URLS:
+        try:
+            r = requests.get(url, timeout=90)
+            r.raise_for_status()
+            s, note = _parse_adequacy(r.content)
+            return s, f"{url.split('/')[-1]}: {note}"
+        except Exception as e:
+            errors.append(f"{url.split('/')[-1]}: {str(e)[:150]}")
+    raise RuntimeError(" | ".join(errors))
 
 
 def merge_demand(csv, extra, now):
@@ -373,4 +406,8 @@ def make_features(w, dem):
     f["year_frac"] = np.asarray(loc.year) + (np.asarray(loc.dayofyear) - 1) / 365.25
     for k in range(1, 7):
         f[f"dow{k}"] = (np.asarray(loc.dayofweek) == k).astype(int)
+    for h in range(24):
+        f[f"hr_{h}"] = (np.asarray(loc.hour) == h).astype(int)
+    for m in range(1, 13):
+        f[f"mo_{m}"] = (np.asarray(loc.month) == m).astype(int)
     return f

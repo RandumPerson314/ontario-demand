@@ -74,3 +74,47 @@ function dailyTable(F,arr){
  return"<table><tr><th>Day</th><th>Peak</th><th>At</th><th>Lowest</th><th>Avg temp</th></tr>"+Object.entries(D).map(([d,ix])=>{
   const pk=ix.reduce((a,i)=>arr[i]>arr[a]?i:a),mn=Math.min(...ix.map(i=>arr[i])),tp=ix.reduce((s,i)=>s+F.temp[i],0)/ix.length;
   return`<tr><td>${DOW[new Date(d+"T12:00:00").getDay()]} ${d.slice(5)}${ix.length<24?" (partial)":""}</td><td>${MW(arr[pk])}</td><td>${F.t[pk].slice(11,13)}:00</td><td>${MW(mn)}</td><td>${tp.toFixed(1)} °C</td></tr>`}).join("")+"</table>"}
+
+/* ---------- evaluate any exported model in the browser (trees, polynomial, or neural network) ---------- */
+function evalModel(id,x){
+ const S=MJ[id],lag=S.lag?x[S.lag]:0;
+ if(S.kind=="gbm"){const v=S.features.map(n=>x[n]);let s=S.base;
+  for(const T of S.trees){let n=0;while(T.f[n]>=0)n=v[T.f[n]]<=T.t[n]?T.l[n]:T.r[n];s+=T.v[n]}return lag+s}
+ if(S.kind=="poly"){const z=S.core.map((c,i)=>(x[c]-S.mean[i])/S.scale[i]);let y=S.icpt,k=0;
+  for(const p of S.powers){let v=1;for(let i=0;i<p.length;i++)if(p[i])v*=Math.pow(z[i],p[i]);y+=S.coef[k++]*v}
+  for(const c of S.linear)y+=S.coef[k++]*x[c];return lag+y}
+ if(!S._w)S._w=S.nets.map(L=>L.map(([W,b])=>[W.map(r=>Float64Array.from(r)),Float64Array.from(b)]));
+ const z=S.features.map((n,i)=>(x[n]-S.mu[i])/S.sd[i]);let tot=0;
+ for(const L of S._w){let a=z;L.forEach(([W,b],li)=>{const o=new Array(W.length);
+   for(let j=0;j<W.length;j++){let s=b[j];const w=W[j];for(let i=0;i<a.length;i++)s+=w[i]*a[i];
+    o[j]=li<L.length-1?s/(1+Math.exp(-Math.max(-60,Math.min(60,s)))):s}a=o});tot+=a[0]}
+ return lag+(tot/S._w.length)*S.ys+S.ym}
+
+/* "what if" changes applied to one hour's inputs; features a model doesn't use are simply ignored */
+const TEMPK=["temp","feels","temp_lag1","temp_lag3","temp_lag24","temp_roll24","temp_roll72"];
+const dewp=(T,H)=>{const g=Math.log(Math.max(H,1)/100)+17.62*T/(243.12+T);return 243.12*g/(17.62-g)};
+function mod(x0,s){
+ const x={...x0},has=n=>n in x0;
+ for(const n in x0)if(TEMPK.includes(n)||n.startsWith("ct_"))x[n]=x0[n]+s.dT;      // every temperature input moves together
+ if(has("hdd"))x.hdd=Math.max(EX.base-x.temp,0);if(has("cdd"))x.cdd=Math.max(x.temp-EX.base,0);
+ if(has("dtemp168"))x.dtemp168=x0.dtemp168+s.dT;
+ for(const k of["humidity","wind","cloud","precip","snow"])if(has(k))x[k]=s[k];
+ if(has("solar"))x.solar=x0.solar*s.solar/100;
+ if(has("dew"))x.dew=x0.dew+dewp(x.temp,s.humidity)-dewp(x0.temp,x0.humidity);
+ if(s.month!=x0.month){x.month=s.month;x.doy=(s.month-.5)*30.44;const b=2*Math.PI*x.doy/365.25;
+  if(has("doy_s")){x.doy_s=Math.sin(b);x.doy_c=Math.cos(b)}for(let m=1;m<=12;m++)if(has("mo_"+m))x["mo_"+m]=m==s.month?1:0}
+ if(s.day){const d={weekday:[2,0,0],saturday:[5,1,0],sunday:[6,1,0],holiday:[0,1,1]}[s.day];
+  x.dow=d[0];x.nonwork=d[1];x.hol=d[2];for(let k=1;k<=6;k++)if(has("dow"+k))x["dow"+k]=d[0]==k?1:0}
+ return x}
+
+/* the written-out polynomial (for polynomial models): every term with its current contribution */
+function polyText(id,x,sortBySize){
+ const S=MJ[id],z=S.core.map((c,i)=>(x[c]-S.mean[i])/S.scale[i]);
+ const names=S.powers.map(p=>p.map((e,i)=>e?"z_"+S.core[i]+(e>1?"^"+e:""):"").filter(Boolean).join("*")||"1").concat(S.linear);
+ const vals=S.powers.map(p=>{let v=1;p.forEach((e,i)=>{if(e)v*=Math.pow(z[i],e)});return v}).concat(S.linear.map(c=>x[c]));
+ const rows=names.map((n,i)=>({n,c:S.coef[i],m:S.coef[i]*vals[i]}));if(sortBySize)rows.sort((a,b)=>Math.abs(b.m)-Math.abs(a.m));
+ const sg=(v,d,w)=>(v<0?"-":"+")+Math.abs(v).toFixed(d).padStart(w),tot=rows.reduce((a,r)=>a+r.m,S.icpt);
+ return"where\n"+S.core.map((c,i)=>`  z_${c} = (${c} - ${S.mean[i].toPrecision(6)}) / ${S.scale[i].toPrecision(6)}`).join("\n")+
+  "\n\n"+(S.lag?`change_in_MW (added to ${S.lag}) = `:"demand_MW = ")+S.icpt.toFixed(3)+"\n"+
+  rows.map(r=>`  ${sg(r.c,4,12)} * ${r.n.padEnd(30)} ${sg(r.m,1,9)} MW`).join("\n")+
+  `\n\nTotal at the selected hour = ${Math.round(tot+(S.lag?x[S.lag]:0)).toLocaleString()} MW`}
