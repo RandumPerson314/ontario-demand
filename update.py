@@ -22,7 +22,7 @@ status = []
 
 
 def note(name, ok, detail=""):
-    status.append(dict(name=name, ok=bool(ok), detail=str(detail)[:220]))
+    status.append(dict(name=name, ok=bool(ok), detail=str(detail)[:500]))
     print(("ok   " if ok else "FAIL ") + f"{name}: {detail}")
 
 

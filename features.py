@@ -285,78 +285,103 @@ def fetch_multiday(csv):
                 info=f"clock={name}, shift={shift}h, matched {n} h to the official file (avg diff {err:.0f} MW)")
 
 
-ADEQUACY_URLS = ["https://reports-public.ieso.ca/public/Adequacy3/PUB_Adequacy3.xml",
-                 "https://reports-public.ieso.ca/public/Adequacy2/PUB_Adequacy2.xml"]
+ADEQUACY_URL = "https://reports-public.ieso.ca/public/Adequacy3/PUB_Adequacy3.xml"
+OUTLINE_FILE = "docs/adequacy_outline.txt"
+_NOT_DEMAND = ("capacity", "outage", "offer", "estimate", "import", "export", "reserve", "uncertain",
+               "wind", "solar", "nuclear", "hydro", "gas", "biofuel", "peak", "price", "schedule", "market")
 
 
 def _parse_adequacy(content):
+    """Find the Ontario demand forecast in the Adequacy report without relying on exact tag names:
+    every hourly element is grouped by its place in the document, then the group that looks like
+    Ontario demand (right size, hourly, named like a demand/forecast, not a supply item) is used."""
     root = ElementTree.fromstring(content)
     tag = lambda e: e.tag.split("}")[-1]
+    parent = {c: p for p in root.iter() for c in p}
+
+    def path(el, depth=4):
+        names, e = [], el
+        while e is not None and len(names) < depth:
+            names.append(tag(e))
+            e = parent.get(e)
+        return "/".join(reversed(names))
+
+    is_date = lambda t: bool(t) and len(t.strip()) >= 10 and t.strip()[:4].isdigit() and t.strip()[4] == "-"
     date, system, groups = None, "", {}
     for el in root.iter():
         n = tag(el)
-        if el.get("DeliveryDate"):
+        if el.get("DeliveryDate") and is_date(el.get("DeliveryDate")):
             date = el.get("DeliveryDate")[:10]
-        if n == "DeliveryDate" and el.text and el.text.strip():
+        if n in ("DeliveryDate", "ForecastDate", "DeliveryDay") and is_date(el.text):
             date = el.text.strip()[:10]
         elif n in ("SystemName", "ZoneName", "AreaName", "Zone", "Area") and el.text and el.text.strip():
             system = el.text.strip()
         else:
             kids = {tag(k): (k.text or "").strip() for k in el}
             h = el.get("DeliveryHour") or el.get("Hour") or kids.get("DeliveryHour") or kids.get("Hour")
-            mw = next((kids[k] for k in ("EnergyMW", "MW", "Value", "Energy") if kids.get(k)), None)
+            mw = next((kids[k] for k in ("EnergyMW", "MW", "Value", "Energy", "Quantity") if kids.get(k)), None)
+            if mw is None and (el.get("DeliveryHour") or el.get("Hour")) and (el.text or "").strip():
+                mw = el.text.strip()
             if h and mw and date:
                 try:
-                    groups.setdefault((system, n), []).append((date, int(h), float(mw)))
+                    groups.setdefault((system, path(el)), []).append((date, int(h), float(mw)))
                 except ValueError:
                     pass
+
+    def stats(key):
+        v = sorted(x[2] for x in groups[key])
+        return len(v), v[len(v) // 2]
+
+    outline = ["system | path | hourly values | median MW | first date-hour"]
+    for k, v in groups.items():
+        n, med = stats(k)
+        outline.append(f"{k[0] or '-'} | {k[1]} | {n} | {med:.0f} | {v[0][0]} h{v[0][1]}")
+    os.makedirs("docs", exist_ok=True)
+    with open(OUTLINE_FILE, "w") as fh:
+        fh.write("\n".join(outline[:120]) + "\n")
 
     def series(key):
         vals = {}
         for d, h, mw in groups[key]:
-            vals.setdefault(pd.Timestamp(d) + pd.DateOffset(hours=h - 1 + 5), mw)   # hour-ending EST -> hour start UTC
+            ts = pd.Timestamp(d) + pd.DateOffset(hours=h - 1 + 5)               # hour-ending EST -> hour start UTC
+            vals[ts] = min(vals.get(ts, mw), mw)                                # two values per hour (peak and average): keep the lower
         return pd.Series(vals).sort_index()
 
-    def tag_rank(n):
-        n = n.lower()
-        if "demand" not in n or any(x in n for x in ("peak", "market", "uncertain", "reserve", "capacity")):
-            return None
-        return 0 if "average" in n else 1 if "forecast" in n else 2
+    def good(key, lo, hi):
+        low = key[1].lower()
+        n, med = stats(key)
+        return n >= 24 and lo <= med <= hi and not any(x in low for x in _NOT_DEMAND)
 
-    # 1) an Ontario-wide series
-    whole = [k for k in groups if tag_rank(k[1]) is not None and (not k[0] or "ontario" in k[0].lower() or "total" in k[0].lower())]
+    def rank(key):
+        low = key[1].lower()
+        return (0 if "average" in low else 1 if "demand" in low else 2 if "forecast" in low else 3, -stats(key)[0])
+
+    whole = [k for k in groups if good(k, 8000, 35000) and (not k[0] or "ontario" in k[0].lower() or "total" in k[0].lower())]
     if whole:
-        key = min(whole, key=lambda k: (tag_rank(k[1]), -len(groups[k])))
+        key = min(whole, key=rank)
         s = series(key)
-        return s, f"used '{key[1]}' for {key[0] or 'Ontario'} ({len(s)} hours, {s.index[0]:%m-%d} to {s.index[-1]:%m-%d})"
-    # 2) the four forecast zones: add them up
-    zone_tags = {}
+        return s, f"used {key[1]} ({len(s)} hours, {s.index[0]:%m-%d} to {s.index[-1]:%m-%d})"
+    zones = {}
     for k in groups:
-        if tag_rank(k[1]) is not None and k[0]:
-            zone_tags.setdefault(k[1], []).append(k)
-    for n, keys in sorted(zone_tags.items(), key=lambda kv: (tag_rank(kv[0]), -len(kv[1]))):
+        if k[0] and good(k, 500, 12000):
+            zones.setdefault(k[1], []).append(k)
+    for p, keys in sorted(zones.items(), key=lambda kv: (rank(kv[1][0])[0], -len(kv[1]))):
         if len(keys) >= 3:
             parts = pd.concat([series(k) for k in keys], axis=1, join="inner")
             if len(parts):
                 s = parts.sum(axis=1)
-                return s, f"added {len(keys)} zones of '{n}' ({len(s)} hours, {s.index[0]:%m-%d} to {s.index[-1]:%m-%d})"
-    seen = ", ".join(f"{k[0] or '-'}/{k[1]}({len(v)})" for k, v in list(groups.items())[:10])
-    raise RuntimeError(f"no demand forecast recognised in the report; hourly groups seen: {seen or 'none'}")
+                return s, f"added {len(keys)} zones of {p} ({len(s)} hours, {s.index[0]:%m-%d} to {s.index[-1]:%m-%d})"
+    seen = "; ".join(f"{k[0] or '-'}:{k[1].split('/')[-1]}({stats(k)[0]}, ~{stats(k)[1]:.0f})" for k in list(groups)[:14])
+    raise RuntimeError(f"no demand forecast recognised; hourly groups: {seen or 'none'}. Full outline in docs/adequacy_outline.txt")
 
 
 def fetch_adequacy():
-    """IESO's Adequacy Report: hourly demand forecast for today and up to ~34 days ahead
-    (published per forecast zone; the zones are added up). Returns (Series by naive UTC hour start, note)."""
-    errors = []
-    for url in ADEQUACY_URLS:
-        try:
-            r = requests.get(url, timeout=90)
-            r.raise_for_status()
-            s, note = _parse_adequacy(r.content)
-            return s, f"{url.split('/')[-1]}: {note}"
-        except Exception as e:
-            errors.append(f"{url.split('/')[-1]}: {str(e)[:150]}")
-    raise RuntimeError(" | ".join(errors))
+    """IESO's Adequacy Report: its hourly demand forecast (today and the days ahead).
+    Returns (Series by naive UTC hour start, note)."""
+    r = requests.get(ADEQUACY_URL, timeout=90)
+    r.raise_for_status()
+    s, note = _parse_adequacy(r.content)
+    return s, note
 
 
 def merge_demand(csv, extra, now):

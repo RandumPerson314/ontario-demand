@@ -101,6 +101,7 @@ function iesoStatus(){
  let h=n?`<p class="verdict"><b>${n}</b> hours of IESO forecasts are saved (${sc} already scored against actual demand), plus <b>${fut}</b> upcoming hours in the 7-day window.${M.ieso_source?" Source: "+M.ieso_source+".":""}</p>`
   :`<p class="verdict"><b>No IESO forecast has been captured yet.</b> The reason is shown below; it appears on every graph and table here as soon as a source works.</p>`;
  h+=st.length?"<table>"+st.map(s=>`<tr><td>${s.ok?"✓":"✗"} ${s.name}</td><td style="text-align:left">${s.detail}</td></tr>`).join("")+"</table>":"<p>No source status recorded yet (the site has not updated since this feature was added).</p>";
+ if(st.some(s=>!s.ok))h+='<p><a href="adequacy_outline.txt">View the structure of the IESO\'s report</a> (for troubleshooting a failed source).</p>';
  $("iesoStatus").innerHTML=h}
 let auto=true;
 function render(){

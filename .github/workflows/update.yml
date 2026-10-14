@@ -20,7 +20,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - id: upd
-        run: python update.py
+        run: python run_update.py
         continue-on-error: true   # still publish the 'source problem' notice if the update fails
       - name: Commit new data
         if: always()
@@ -29,6 +29,7 @@ jobs:
           git config user.email "demand-bot@users.noreply.github.com"
           git add docs/demand_log.js docs/forecast.js docs/forecast_archive.js
           git add data 2>/dev/null || true
+          git add docs/adequacy_outline.txt 2>/dev/null || true
           git diff --cached --quiet || (git commit -m "update demand log" && git pull --rebase && git push)
       - name: Report failure
         if: steps.upd.outcome == 'failure'

@@ -39,7 +39,7 @@ function banner(){
  const age=M.updated?(Date.now()-Date.parse(M.updated))/6e4:null,bad=(M.status||[]).filter(s=>!s.ok);let msg="";
  if(age==null)msg="No update has run yet, so there is no data to show.";
  else if(age>35)msg="The data was last updated "+(age<120?Math.round(age)+" minutes":Math.round(age/60)+" hours")+" ago, so the automatic update is running late. Numbers on this page may be out of date.";
- if(bad.length)msg+=(msg?" ":"")+"Problems with data sources: "+bad.map(s=>s.name+" ("+s.detail+")").join("; ")+".";
+ if(bad.length)msg+=(msg?" ":"")+"Problem with: "+bad.map(s=>s.name+(s.name.startsWith("Update job")?" ("+s.detail.slice(0,160)+")":"")).join(", ")+" (details on the Comparison page).";
  el.style.display=msg?"block":"none";el.textContent=msg}
 
 /* ---------- the five cards, for any model id ---------- */
