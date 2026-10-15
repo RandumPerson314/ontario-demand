@@ -88,14 +88,13 @@ try:
     note("IESO live hourly feed", True, multi["info"])
 except Exception as e:
     note("IESO live hourly feed", False, e)
+dem = merge_demand(csv, multi["actual"] if multi else None, now)
 try:
-    adeq, info = fetch_adequacy()
+    adeq, info = fetch_adequacy(actual=dem)
     note("IESO forecast report", True, info)
 except Exception as e:
     note("IESO forecast report", False, e)
 ieso = proj.combine_first(adeq)                    # IESO's official forecast: short-range feed, then the adequacy report
-
-dem = merge_demand(csv, multi["actual"] if multi else None, now)
 try:
     weather = fetch_live()
     note("Weather (Open-Meteo)", ft.LIVE_STATUS["ok"], ft.LIVE_STATUS["detail"])
@@ -169,12 +168,20 @@ print("this hour:", {k: cur[k] for k in KEYS if cur and cur[k] is not None} if c
 prev_fc = read_js(FC_FILE, "window.FC=")
 if prev_fc and prev_fc.get("u") and prev_fc["u"][0] == ukey(now) and "m" in prev_fc:
     print("7-day forecast already written for this hour")
+    status.extend(s for s in prev_meta.get("status", []) if s["name"] == "IESO 7-day report files")   # keep the last result
 else:
     names = sorted({c for fid in FIDS for c in model_for(fid, "wk").feats})     # every input any model's explorer needs
     fc = F.loc[now:now + pd.DateOffset(hours=167)].dropna(subset=names)
     if len(fc):
         M = {fid: [round(float(p)) for p in model_for(fid, "wk").predict(fc)] for fid in FIDS}
-        off = [None if i not in ieso.index or np.isnan(ieso[i]) else round(float(ieso[i])) for i in fc.index]
+        ieso7 = ieso
+        try:                                           # the dated daily report files cover the days ahead
+            adeq7, info7 = fetch_adequacy(actual=dem, days=8, today=now)
+            ieso7 = proj.combine_first(adeq7)
+            note("IESO 7-day report files", True, info7)
+        except Exception as e:
+            note("IESO 7-day report files", False, e)
+        off = [None if i not in ieso7.index or np.isnan(ieso7[i]) else round(float(ieso7[i])) for i in fc.index]
         out = dict(updated=meta["updated"], u=[ukey(i) for i in fc.index], t=[local_label(i) for i in fc.index],
                    pred=M["gbm"], m=M, ieso=off, temp=[round(float(v), 1) for v in fc["temp"]],
                    names=names, X=[[round(float(v), 4) for v in r] for r in fc[names].values])
@@ -192,3 +199,4 @@ else:
             fh.write("window.ARCH=" + json.dumps(arch[-21:], separators=(",", ":")) + ";")
     else:
         print("no complete forecast rows (missing inputs)")
+write_log(rows, meta)                                  # again, so statuses recorded while building the forecast are saved

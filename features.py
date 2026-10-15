@@ -280,26 +280,24 @@ def fetch_multiday(csv):
         os.makedirs("data", exist_ok=True)
         json.dump({"name": best[1], "shift": best[2]}, open(CAL_FILE, "w"))
     err, name, shift, n = best
+    counts = ", ".join(f"{k}: {int(np.isfinite(v).sum())} values" for k, v in series.items())
     return dict(actual=build(act, name, shift).dropna(),
                 projected=build(proj, name, shift).dropna() if proj is not None else pd.Series(dtype=float),
-                info=f"clock={name}, shift={shift}h, matched {n} h to the official file (avg diff {err:.0f} MW)")
+                info=f"clock={name}, shift={shift}h, matched {n} h to the official file (avg diff {err:.0f} MW); series: {counts}")
 
 
-ADEQUACY_URL = "https://reports-public.ieso.ca/public/Adequacy3/PUB_Adequacy3.xml"
+ADEQUACY_BASE = "https://reports-public.ieso.ca/public/Adequacy3/"
 OUTLINE_FILE = "docs/adequacy_outline.txt"
-_NOT_DEMAND = ("capacity", "outage", "offer", "estimate", "import", "export", "reserve", "uncertain",
-               "wind", "solar", "nuclear", "hydro", "gas", "biofuel", "peak", "price", "schedule", "market")
 
 
-def _parse_adequacy(content):
-    """Find the Ontario demand forecast in the Adequacy report without relying on exact tag names:
-    every hourly element is grouped by its place in the document, then the group that looks like
-    Ontario demand (right size, hourly, named like a demand/forecast, not a supply item) is used."""
+def _adequacy_groups(content, outline=False):
+    """Every hourly series in one Adequacy report, grouped by where it sits in the document.
+    (The report is one delivery day per file and also lists imports/exports by neighbouring region.)"""
     root = ElementTree.fromstring(content)
     tag = lambda e: e.tag.split("}")[-1]
     parent = {c: p for p in root.iter() for c in p}
 
-    def path(el, depth=4):
+    def path(el, depth=5):
         names, e = [], el
         while e is not None and len(names) < depth:
             names.append(tag(e))
@@ -307,80 +305,96 @@ def _parse_adequacy(content):
         return "/".join(reversed(names))
 
     is_date = lambda t: bool(t) and len(t.strip()) >= 10 and t.strip()[:4].isdigit() and t.strip()[4] == "-"
-    date, system, groups = None, "", {}
+    date, groups = None, {}
     for el in root.iter():
         n = tag(el)
         if el.get("DeliveryDate") and is_date(el.get("DeliveryDate")):
             date = el.get("DeliveryDate")[:10]
         if n in ("DeliveryDate", "ForecastDate", "DeliveryDay") and is_date(el.text):
             date = el.text.strip()[:10]
-        elif n in ("SystemName", "ZoneName", "AreaName", "Zone", "Area") and el.text and el.text.strip():
-            system = el.text.strip()
-        else:
-            kids = {tag(k): (k.text or "").strip() for k in el}
-            h = el.get("DeliveryHour") or el.get("Hour") or kids.get("DeliveryHour") or kids.get("Hour")
-            mw = next((kids[k] for k in ("EnergyMW", "MW", "Value", "Energy", "Quantity") if kids.get(k)), None)
-            if mw is None and (el.get("DeliveryHour") or el.get("Hour")) and (el.text or "").strip():
-                mw = el.text.strip()
-            if h and mw and date:
-                try:
-                    groups.setdefault((system, path(el)), []).append((date, int(h), float(mw)))
-                except ValueError:
-                    pass
-
-    def stats(key):
-        v = sorted(x[2] for x in groups[key])
-        return len(v), v[len(v) // 2]
-
-    outline = ["system | path | hourly values | median MW | first date-hour"]
-    for k, v in groups.items():
-        n, med = stats(k)
-        outline.append(f"{k[0] or '-'} | {k[1]} | {n} | {med:.0f} | {v[0][0]} h{v[0][1]}")
-    os.makedirs("docs", exist_ok=True)
-    with open(OUTLINE_FILE, "w") as fh:
-        fh.write("\n".join(outline[:120]) + "\n")
-
-    def series(key):
-        vals = {}
-        for d, h, mw in groups[key]:
-            ts = pd.Timestamp(d) + pd.DateOffset(hours=h - 1 + 5)               # hour-ending EST -> hour start UTC
-            vals[ts] = min(vals.get(ts, mw), mw)                                # two values per hour (peak and average): keep the lower
-        return pd.Series(vals).sort_index()
-
-    def good(key, lo, hi):
-        low = key[1].lower()
-        n, med = stats(key)
-        return n >= 24 and lo <= med <= hi and not any(x in low for x in _NOT_DEMAND)
-
-    def rank(key):
-        low = key[1].lower()
-        return (0 if "average" in low else 1 if "demand" in low else 2 if "forecast" in low else 3, -stats(key)[0])
-
-    whole = [k for k in groups if good(k, 8000, 35000) and (not k[0] or "ontario" in k[0].lower() or "total" in k[0].lower())]
-    if whole:
-        key = min(whole, key=rank)
-        s = series(key)
-        return s, f"used {key[1]} ({len(s)} hours, {s.index[0]:%m-%d} to {s.index[-1]:%m-%d})"
-    zones = {}
-    for k in groups:
-        if k[0] and good(k, 500, 12000):
-            zones.setdefault(k[1], []).append(k)
-    for p, keys in sorted(zones.items(), key=lambda kv: (rank(kv[1][0])[0], -len(kv[1]))):
-        if len(keys) >= 3:
-            parts = pd.concat([series(k) for k in keys], axis=1, join="inner")
-            if len(parts):
-                s = parts.sum(axis=1)
-                return s, f"added {len(keys)} zones of {p} ({len(s)} hours, {s.index[0]:%m-%d} to {s.index[-1]:%m-%d})"
-    seen = "; ".join(f"{k[0] or '-'}:{k[1].split('/')[-1]}({stats(k)[0]}, ~{stats(k)[1]:.0f})" for k in list(groups)[:14])
-    raise RuntimeError(f"no demand forecast recognised; hourly groups: {seen or 'none'}. Full outline in docs/adequacy_outline.txt")
+            continue
+        kids = {tag(k): (k.text or "").strip() for k in el}
+        h = el.get("DeliveryHour") or el.get("Hour") or kids.get("DeliveryHour") or kids.get("Hour")
+        mw = next((kids[k] for k in ("EnergyMW", "MW", "Value", "Energy", "Quantity") if kids.get(k)), None)
+        if mw is None and (el.get("DeliveryHour") or el.get("Hour")) and (el.text or "").strip():
+            mw = el.text.strip()
+        if h and mw and date:
+            try:
+                groups.setdefault(path(el), []).append((date, int(h), float(mw)))
+            except ValueError:
+                pass
+    if outline:
+        lines = ["path | hourly values | median | first date-hour"]
+        for p, v in groups.items():
+            vals = sorted(x[2] for x in v)
+            lines.append(f"{p} | {len(v)} | {vals[len(vals) // 2]:.0f} | {v[0][0]} h{v[0][1]}")
+        os.makedirs("docs", exist_ok=True)
+        with open(OUTLINE_FILE, "w") as fh:
+            fh.write("\n".join(lines[:150]) + "\n")
+    return groups
 
 
-def fetch_adequacy():
-    """IESO's Adequacy Report: its hourly demand forecast (today and the days ahead).
-    Returns (Series by naive UTC hour start, note)."""
-    r = requests.get(ADEQUACY_URL, timeout=90)
+def _series_of(rows):
+    vals = {}
+    for d, h, mw in rows:
+        ts = pd.Timestamp(d) + pd.DateOffset(hours=h - 1 + 5)                   # hour-ending EST -> hour start UTC
+        vals[ts] = min(vals.get(ts, mw), mw)                                    # peak and average in one place: keep the lower
+    return pd.Series(vals).sort_index()
+
+
+def _choose(groups, actual):
+    """Pick the hourly series that is Ontario's demand forecast. Names can't be trusted, so each
+    plausible series is compared with the demand that actually happened in the hours the report covers."""
+    cands = []
+    for p, rows in groups.items():
+        s = _series_of(rows)
+        if len(s) >= 24 and 5000 <= float(s.median()) <= 40000:
+            score = None
+            if actual is not None and len(actual):
+                common = s.index.intersection(actual.index)
+                if len(common) >= 6:
+                    score = float((s.loc[common] - actual.loc[common]).abs().mean())
+            cands.append((score, p, s, float(s.median())))
+    scored = [c for c in cands if c[0] is not None]
+    if scored:
+        best = min(scored, key=lambda c: c[0])
+        if best[0] <= 1000:
+            return best
+        near = "; ".join(f"{c[1].split('/')[-1]} (off by {c[0]:.0f} MW)" for c in sorted(scored, key=lambda c: c[0])[:4])
+        raise RuntimeError(f"no series in the report is close to actual demand; closest: {near}")
+    named = [c for c in cands if "demand" in c[1].lower()]
+    if named:
+        top = max(c[3] for c in named)
+        return min((c for c in named if c[3] >= 0.85 * top), key=lambda c: c[3])
+    seen = "; ".join(f"{p.split('/')[-1]}({len(v)}, ~{sorted(x[2] for x in v)[len(v) // 2]:.0f})" for p, v in list(groups.items())[:12])
+    raise RuntimeError(f"no candidate demand series; groups: {seen or 'none'}. See docs/adequacy_outline.txt")
+
+
+def fetch_adequacy(actual=None, days=0, today=None):
+    """IESO's Adequacy Report: its hourly demand forecast. The newest report covers the current day; with
+    days>0 the dated daily files for the coming days are added too. Returns (Series by naive UTC hour start, note)."""
+    r = requests.get(ADEQUACY_BASE + "PUB_Adequacy3.xml", timeout=90)
     r.raise_for_status()
-    s, note = _parse_adequacy(r.content)
+    score, path, s, med = _choose(_adequacy_groups(r.content, outline=True), actual)
+    note = f"series '{path.split('/')[-1]}' ({len(s)} h" + (f", avg {score:.0f} MW from actual demand)" if score is not None else ", not checked against actual demand)")
+    if days:
+        ok, first_err = 0, None
+        d0 = (pd.Timestamp(today) if today is not None else pd.Timestamp.now(tz="UTC").tz_localize(None)) - pd.DateOffset(hours=5)
+        d0 = d0.normalize()
+        for k in range(days):
+            name = f"PUB_Adequacy3_{(d0 + pd.DateOffset(days=k)):%Y%m%d}.xml"
+            try:
+                rr = requests.get(ADEQUACY_BASE + name, timeout=60)
+                rr.raise_for_status()
+                g = _adequacy_groups(rr.content)
+                if path in g:
+                    s = s.combine_first(_series_of(g[path]))
+                    ok += 1
+                else:
+                    first_err = first_err or f"{name}: different layout"
+            except Exception as e:
+                first_err = first_err or f"{name}: {str(e)[:70]}"
+        note += f"; dated daily files read {ok}/{days}" + (f" (first problem: {first_err})" if first_err else "")
     return s, note
 
 
