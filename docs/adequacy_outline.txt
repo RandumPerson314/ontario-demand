@@ -7,9 +7,9 @@ ForecastSupply/InternalResources/InternalResource/OfferForecasts/OfferForecast |
 ForecastSupply/InternalResources/TotalInternalResources/Outages/Outage | 24 | 12945 | 2026-11-22 h1
 ForecastSupply/ZonalImports/TotalImports/Estimates/Estimate | 24 | 1800 | 2026-11-22 h1
 ForecastSupply/ZonalImports/TotalImports/Capacities/Capacity | 24 | 0 | 2026-11-22 h1
-Document/DocBody/ForecastSupply/BottledCapacities/Capacity | 24 | 500 | 2026-11-22 h1
+Document/DocBody/ForecastSupply/BottledCapacities/Capacity | 24 | 596 | 2026-11-22 h1
 Document/DocBody/ForecastSupply/Regulations/Regulation | 24 | 130 | 2026-11-22 h1
-Document/DocBody/ForecastSupply/TotalSupplies/Supply | 24 | 25700 | 2026-11-22 h1
+Document/DocBody/ForecastSupply/TotalSupplies/Supply | 24 | 25609 | 2026-11-22 h1
 DocBody/ForecastDemand/OntarioDemand/ForecastOntDemand/Demand | 24 | 17362 | 2026-11-22 h1
 DocBody/ForecastDemand/OntarioDemand/AverageDemand/Demand | 24 | 17362 | 2026-11-22 h1
 ForecastDemand/OntarioDemand/DispatchableLoad/Capacities/Capacity | 24 | 3181 | 2026-11-22 h1
@@ -22,4 +22,4 @@ DocBody/ForecastDemand/GenerationReserveHoldback/Min10MinSpinOR/Min10SpinOR | 24
 DocBody/ForecastDemand/GenerationReserveHoldback/LoadForecastUncertainties/Uncertainty | 24 | 0 | 2026-11-22 h1
 DocBody/ForecastDemand/GenerationReserveHoldback/ContingencyAllowances/Allowance | 24 | 828 | 2026-11-22 h1
 Document/DocBody/ForecastDemand/TotalRequirements/Requirement | 24 | 18978 | 2026-11-22 h1
-Document/DocBody/ForecastDemand/ExcessCapacities/Capacity | 24 | 6726 | 2026-11-22 h1
+Document/DocBody/ForecastDemand/ExcessCapacities/Capacity | 24 | 6638 | 2026-11-22 h1
