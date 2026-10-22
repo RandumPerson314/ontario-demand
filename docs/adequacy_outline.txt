@@ -3,13 +3,13 @@ Document/DocBody/ForecastSupply/Capacities/Capacity | 24 | 38264 | 2026-11-25 h1
 ForecastSupply/InternalResources/InternalResource/Capacities/Capacity | 192 | 4943 | 2026-11-25 h1
 ForecastSupply/InternalResources/InternalResource/Outages/Outage | 192 | 1358 | 2026-11-25 h1
 ForecastSupply/InternalResources/InternalResource/Forecasts/Forecast | 48 | 1201 | 2026-11-25 h1
-ForecastSupply/InternalResources/InternalResource/OfferForecasts/OfferForecast | 24 | 150 | 2026-11-25 h1
-ForecastSupply/InternalResources/TotalInternalResources/Outages/Outage | 24 | 12851 | 2026-11-25 h1
+ForecastSupply/InternalResources/InternalResource/OfferForecasts/OfferForecast | 24 | 148 | 2026-11-25 h1
+ForecastSupply/InternalResources/TotalInternalResources/Outages/Outage | 24 | 12865 | 2026-11-25 h1
 ForecastSupply/ZonalImports/TotalImports/Estimates/Estimate | 24 | 1800 | 2026-11-25 h1
 ForecastSupply/ZonalImports/TotalImports/Capacities/Capacity | 24 | 0 | 2026-11-25 h1
 Document/DocBody/ForecastSupply/BottledCapacities/Capacity | 24 | 500 | 2026-11-25 h1
 Document/DocBody/ForecastSupply/Regulations/Regulation | 24 | 130 | 2026-11-25 h1
-Document/DocBody/ForecastSupply/TotalSupplies/Supply | 24 | 25553 | 2026-11-25 h1
+Document/DocBody/ForecastSupply/TotalSupplies/Supply | 24 | 25552 | 2026-11-25 h1
 DocBody/ForecastDemand/OntarioDemand/ForecastOntDemand/Demand | 24 | 19470 | 2026-11-25 h1
 DocBody/ForecastDemand/OntarioDemand/AverageDemand/Demand | 24 | 19470 | 2026-11-25 h1
 ForecastDemand/OntarioDemand/DispatchableLoad/Capacities/Capacity | 24 | 3181 | 2026-11-25 h1
@@ -22,4 +22,4 @@ DocBody/ForecastDemand/GenerationReserveHoldback/Min10MinSpinOR/Min10SpinOR | 24
 DocBody/ForecastDemand/GenerationReserveHoldback/LoadForecastUncertainties/Uncertainty | 24 | 0 | 2026-11-25 h1
 DocBody/ForecastDemand/GenerationReserveHoldback/ContingencyAllowances/Allowance | 24 | 946 | 2026-11-25 h1
 Document/DocBody/ForecastDemand/TotalRequirements/Requirement | 24 | 21204 | 2026-11-25 h1
-Document/DocBody/ForecastDemand/ExcessCapacities/Capacity | 24 | 4358 | 2026-11-25 h1
+Document/DocBody/ForecastDemand/ExcessCapacities/Capacity | 24 | 4357 | 2026-11-25 h1
