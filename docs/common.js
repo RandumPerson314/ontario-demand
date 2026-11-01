@@ -42,26 +42,45 @@ function banner(){
  if(bad.length)msg+=(msg?" ":"")+"Problem with: "+bad.map(s=>s.name+(s.name.startsWith("Update job")?" ("+s.detail.slice(0,160)+")":"")).join(", ")+" (details on the Comparison page).";
  el.style.display=msg?"block":"none";el.textContent=msg}
 
+/* ---------- helpers for "right now" numbers: fresh browser data first, then what the site last saved ---------- */
+const hkey=ms=>new Date(ms).toISOString().slice(0,13)+":00",
+ htl=ms=>new Date(ms).toLocaleString("sv-SE",{timeZone:"America/Toronto"}).slice(0,13)+":00",
+ ago=ms=>{const h=Math.round((Date.now()-ms)/36e5);return h<1?"under an hour ago":h+(h==1?" hour":" hours")+" ago"};
+function liveNow(){   // demand so far this hour; if that isn't available, the newest reading, clearly labelled
+ const LV=window.LIVE,M=window.LOG_META||{},H=36e5,t0=Math.floor(Date.now()/H)*H,k0=hkey(t0);
+ if(LV&&LV.rt&&LV.rt.key==k0)return{v:LV.rt.avg,fresh:1,sub:htl(t0).slice(5)+" hour · average of "+LV.rt.n+" readings, latest at "+
+  new Date(LV.rt.last).toLocaleTimeString("en-CA",{timeZone:"America/Toronto",hour:"2-digit",minute:"2-digit",hour12:false})};
+ if(M.live_mw!=null&&lab(M.live_t)==htl(t0))return{v:M.live_mw,fresh:1,sub:htl(t0).slice(5)+" hour · average of "+M.live_n+" readings, latest at "+M.live_last};
+ const c=[];if(LV&&LV.rt)c.push({v:LV.rt.avg,k:htl(Date.parse(LV.rt.key+":00Z"))});if(M.live_mw!=null)c.push({v:M.live_mw,k:lab(M.live_t)});
+ c.sort((a,b)=>a.k<b.k?1:-1);
+ return c.length?{v:c[0].v,fresh:0,sub:"not this hour: the newest reading is for the "+c[0].k.slice(5)+" hour (Toronto time), so the data is delayed"}
+  :{v:null,fresh:0,sub:"no reading available yet"}}
+function lastDone(L){  // actual demand for the hour that just ended; if missing, the newest completed hour on record
+ const LV=window.LIVE,H=36e5,t0=Math.floor(Date.now()/H)*H,k1=hkey(t0-H),kn=hkey(t0);
+ if(LV&&LV.actual&&LV.actual[k1]!=null)return{v:LV.actual[k1],ms:t0-H,fresh:1};
+ const r=L.find(r=>r.u==k1);if(r&&r.actual!=null)return{v:r.actual,ms:t0-H,fresh:1};
+ const best=[];if(LV&&LV.actual)for(const k in LV.actual)if(k<kn)best.push([k,LV.actual[k]]);
+ L.forEach(r=>{if(r.actual!=null&&r.u<kn)best.push([r.u,r.actual])});best.sort((a,b)=>a[0]<b[0]?1:-1);
+ return best.length?{v:best[0][1],ms:Date.parse(best[0][0]+":00Z"),fresh:0}:null}
+
 /* ---------- the five cards, for any model id ---------- */
 function cardsFor(id){
- const L=window.LOG||[],M=window.LOG_META||{},F=window.FC,H=36e5,t0=Math.floor(Date.now()/H)*H;
- const key=ms=>new Date(ms).toISOString().slice(0,13)+":00",
- tl=ms=>new Date(ms).toLocaleString("sv-SE",{timeZone:"America/Toronto"}).slice(0,13)+":00",
+ const L=window.LOG||[],F=window.FC,H=36e5,t0=Math.floor(Date.now()/H)*H,
  arr=F&&(F.m?F.m[id]:id=="gbm"?F.pred:null),fcAt=k=>{const i=F?F.u.indexOf(k):-1;return i<0||!arr?null:arr[i]};
  const pick=(k,fields)=>{const r=L.find(r=>r.u==k);if(r)for(const[f,s]of fields)if(r[f]!=null)return[r[f],s];
   const v=fcAt(k);return v==null?[null,""]:[v,"7-day forecast run"]};
- const show=(b,t,v,s,ms)=>{$(b).textContent=v==null?"-":MW(v);$(t).textContent=tl(ms).slice(5)+" Toronto time"+(v==null?" · not available yet":" · "+s)};
- const[a,as]=pick(key(t0),[[id+"_h","made this hour"],[id+"_n","made an hour ahead"]]),[b,bs]=pick(key(t0+H),[[id+"_n","made this hour"]]);
+ const show=(b,t,v,s,ms)=>{$(b).textContent=v==null?"-":MW(v);$(t).textContent=htl(ms).slice(5)+" Toronto time"+(v==null?" · not available yet":" · "+s)};
+ const[a,as]=pick(hkey(t0),[[id+"_h","made this hour"],[id+"_n","made an hour ahead"]]),[b,bs]=pick(hkey(t0+H),[[id+"_n","made this hour"]]);
  show("p","pt",a,as,t0);show("n","nt",b,bs,t0+H);
- /* actual demand so far THIS hour: only if the reading really is for the current Toronto hour */
- if(M.live_mw!=null&&lab(M.live_t)==tl(t0)){$("l").textContent=MW(M.live_mw);
-  $("lt").textContent=tl(t0).slice(5)+" hour · average of "+M.live_n+" readings, latest at "+M.live_last+
-   (a!=null?" · prediction is "+((100*(a/M.live_mw-1)).toFixed(1)).replace(/^(\d)/,"+$1")+"%":"")}
- else{$("l").textContent="-";$("lt").textContent=M.live_mw!=null?"waiting for the new hour's first readings (newest data is for the "+lab(M.live_t).slice(11)+" hour)":"no reading yet"}
- /* last COMPLETED hour = the hour before the current one */
- const rp=L.find(r=>r.u==key(t0-H));
- if(rp&&rp.actual!=null){$("a").textContent=MW(rp.actual);$("at").textContent=tl(t0-H).slice(5)+" Toronto time"+(rp[id+"_h"]!=null?" · model said "+MW(rp[id+"_h"]):"")}
- else{$("a").textContent="-";$("at").textContent=tl(t0-H).slice(5)+" hour · not published yet"}
+ const lv=liveNow();                                   // actual demand so far this hour
+ $("l").textContent=lv.v==null?"-":MW(lv.v);
+ $("lt").textContent=lv.sub+(lv.fresh&&a!=null?" · prediction is "+((100*(a/lv.v-1)).toFixed(1)).replace(/^(\d)/,"+$1")+"%":"");
+ if($("l").previousElementSibling)$("l").previousElementSibling.textContent=lv.fresh?"Actual demand this hour (so far)":"Latest reading (not this hour)";
+ const ld=lastDone(L);                                 // last completed hour
+ if(ld){const r=L.find(r=>r.u==hkey(ld.ms));$("a").textContent=MW(ld.v);
+  $("at").textContent=htl(ld.ms).slice(5)+" Toronto time"+(ld.fresh?"":" · "+ago(ld.ms)+", data is delayed")+(r&&r[id+"_h"]!=null?" · model said "+MW(r[id+"_h"]):"")}
+ else{$("a").textContent="-";$("at").textContent=htl(t0-H).slice(5)+" hour · not published yet"}
+ if($("a").previousElementSibling)$("a").previousElementSibling.textContent=ld&&!ld.fresh?"Latest completed hour on record":"Last completed hour (IESO)";
  const wk=L.slice(-168).filter(r=>r.actual!=null&&r[id+"_h"]!=null),live=wk.filter(r=>!r.bf),use=live.length>=12?live:wk;
  if(use.length){const e=use.map(r=>r[id+"_h"]-r.actual),mae=e.reduce((s,x)=>s+Math.abs(x),0)/e.length;
   $("m").textContent="±"+Math.round(mae)+" MW";

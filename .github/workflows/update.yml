@@ -1,7 +1,7 @@
 name: update-demand-log
 on:
   schedule:
-    - cron: "2,17,32,47 * * * *"   # every 15 minutes, UTC
+    - cron: "9,24,39,54 * * * *"   # every 15 minutes, UTC (not at :00 when GitHub is busiest)
   workflow_dispatch:             # lets you run it manually from the Actions tab
 permissions:
   contents: write
@@ -11,7 +11,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,6 +20,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - id: upd
+        timeout-minutes: 8          # a stuck update is cut off here, and the next step still publishes what exists
         run: python run_update.py
         continue-on-error: true   # still publish the 'source problem' notice if the update fails
       - name: Commit new data

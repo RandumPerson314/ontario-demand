@@ -1,4 +1,5 @@
 """Shared data loading + feature engineering (training and live updates use the same code)."""
+import io
 import json
 import os
 import time
@@ -87,10 +88,10 @@ _HOL = pd.to_datetime(list(holidays.Canada(subdiv="ON", years=range(2018, 2034))
 
 
 # ------------------------------------------------------------------ weather
-def _get(url, params, tries=8, base_wait=60):
+def _get(url, params, tries=8, base_wait=60, timeout=60):
     for i in range(tries):
         try:
-            r = requests.get(url, params=params, timeout=60)
+            r = requests.get(url, params=params, timeout=timeout)
             if r.status_code == 429:
                 raise requests.exceptions.RetryError("429 rate limited")
             r.raise_for_status()
@@ -154,7 +155,7 @@ def fetch_live(forecast_days=9):
         d = _get("https://api.open-meteo.com/v1/forecast", {
             "latitude": ",".join(str(c[0]) for c in C), "longitude": ",".join(str(c[1]) for c in C),
             "hourly": ",".join(VARS), "past_days": 14, "forecast_days": forecast_days,
-            "timezone": "GMT"}, tries=3, base_wait=15)
+            "timezone": "GMT"}, tries=2, base_wait=10, timeout=30)
         d = d if isinstance(d, list) else [d]
         acc, ct = None, {}
         for x, c, name in zip(d, C, CITIES):
@@ -183,8 +184,9 @@ def fetch_demand(years):
     out = []
     for y in years:
         try:
-            df = pd.read_csv(f"https://reports-public.ieso.ca/public/Demand/PUB_Demand_{y}.csv",
-                             skiprows=3).dropna(subset=["Ontario Demand"])
+            r = requests.get(f"https://reports-public.ieso.ca/public/Demand/PUB_Demand_{y}.csv", timeout=30)   # (pandas' own URL reader has no time limit)
+            r.raise_for_status()
+            df = pd.read_csv(io.StringIO(r.text), skiprows=3).dropna(subset=["Ontario Demand"])
         except Exception as e:
             print(f"IESO {y}: {e}")
             continue
@@ -200,7 +202,7 @@ def fetch_live_demand():
     """Ontario 5-minute demand for the current IESO hour (timestamps are naive EST).
     Returns the newest reading plus all readings of the hour in 'rows'."""
     r = requests.get("https://reports-public.ieso.ca/public/RealtimeTotals/PUB_RealtimeTotals.xml",
-                     timeout=60)
+                     timeout=25)
     r.raise_for_status()
     root = ElementTree.fromstring(r.content)
     tag = lambda e: e.tag.split("}")[-1]
@@ -235,7 +237,7 @@ def fetch_multiday(csv):
     """IESO's own hourly chart feed: recent hourly *actual* demand (fresh, unlike the yearly
     file) and IESO's *projected* (official forecast) demand. Its clock convention is not
     documented, so we compare it with the official hourly file to work out the alignment."""
-    r = requests.get(MULTIDAY_URL, timeout=60)
+    r = requests.get(MULTIDAY_URL, timeout=25)
     r.raise_for_status()
     root = ElementTree.fromstring(r.content)
     tag = lambda e: e.tag.split("}")[-1]
@@ -281,7 +283,7 @@ def fetch_multiday(csv):
         json.dump({"name": best[1], "shift": best[2]}, open(CAL_FILE, "w"))
     err, name, shift, n = best
     counts = ", ".join(f"{k}: {int(np.isfinite(v).sum())} values" for k, v in series.items())
-    return dict(actual=build(act, name, shift).dropna(),
+    return dict(cal=dict(name=name, shift=shift), actual=build(act, name, shift).dropna(),
                 projected=build(proj, name, shift).dropna() if proj is not None else pd.Series(dtype=float),
                 info=f"clock={name}, shift={shift}h, matched {n} h to the official file (avg diff {err:.0f} MW); series: {counts}")
 
@@ -373,18 +375,21 @@ def _choose(groups, actual):
 def fetch_adequacy(actual=None, days=0, today=None):
     """IESO's Adequacy Report: its hourly demand forecast. The newest report covers the current day; with
     days>0 the dated daily files for the coming days are added too. Returns (Series by naive UTC hour start, note)."""
-    r = requests.get(ADEQUACY_BASE + "PUB_Adequacy3.xml", timeout=90)
+    r = requests.get(ADEQUACY_BASE + "PUB_Adequacy3.xml", timeout=30)
     r.raise_for_status()
     score, path, s, med = _choose(_adequacy_groups(r.content, outline=True), actual)
     note = f"series '{path.split('/')[-1]}' ({len(s)} h" + (f", avg {score:.0f} MW from actual demand)" if score is not None else ", not checked against actual demand)")
     if days:
-        ok, first_err = 0, None
+        ok, first_err, t_start = 0, None, time.monotonic()
         d0 = (pd.Timestamp(today) if today is not None else pd.Timestamp.now(tz="UTC").tz_localize(None)) - pd.DateOffset(hours=5)
         d0 = d0.normalize()
         for k in range(days):
+            if time.monotonic() - t_start > 90:                                  # never let this hold up the update
+                first_err = first_err or "stopped after 90 s"
+                break
             name = f"PUB_Adequacy3_{(d0 + pd.DateOffset(days=k)):%Y%m%d}.xml"
             try:
-                rr = requests.get(ADEQUACY_BASE + name, timeout=60)
+                rr = requests.get(ADEQUACY_BASE + name, timeout=20)
                 rr.raise_for_status()
                 g = _adequacy_groups(rr.content)
                 if path in g:

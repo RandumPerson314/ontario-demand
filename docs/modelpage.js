@@ -105,6 +105,6 @@
  function render(){banner();cardsFor(id);forecast();past();drawEx();about()}
  function reload(){let n=2;for(const f of["demand_log.js","forecast.js"]){const s=document.createElement("script");s.src=f+"?"+Date.now();
   s.onload=s.onerror=()=>{s.remove();if(!--n){if(window.FC&&FC.u)sel=Math.min(sel,FC.u.length-1);render()}};document.head.appendChild(s)}}
- $("rng").onchange=past;addEventListener("resize",render);setInterval(reload,300000);
+ window.onLive=render;$("rng").onchange=past;addEventListener("resize",render);setInterval(reload,300000);
  if(ready())resetSc();render();
 })();

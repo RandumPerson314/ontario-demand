@@ -5,6 +5,7 @@ Writes docs/demand_log.js       recent hours: every model's predictions, IESO's 
        docs/forecast_archive.js one frozen 7-day forecast per day, to measure real forecast accuracy"""
 import json
 import os
+import time
 
 import joblib
 import numpy as np
@@ -19,6 +20,7 @@ KEEP = 24 * 14
 FIDS = list(FAMILIES)
 KEYS = [f"{fid}{s}" for fid in FIDS for s in ("_h", "_n")] + ["ieso_h", "ieso_n"]   # _h = this hour, _n = next hour
 status = []
+T0 = time.monotonic()
 
 
 def note(name, ok, detail=""):
@@ -158,6 +160,8 @@ try:   # average of the 5-minute readings so far in the current IESO hour (IESO 
 except Exception as e:
     note("IESO 5-minute readings", False, e)
 meta["status"] = status
+if multi:
+    meta["feed_cal"] = multi["cal"]                  # lets the website's browser code read the same IESO feed
 meta["ieso_hours"] = sum(1 for r in rows if r.get("ieso_n") is not None)
 meta["ieso_source"] = ("live feed projection" if len(proj) else "") + (" + adequacy report" if len(adeq) else "") or "none"
 write_log(rows, meta)
@@ -176,6 +180,8 @@ else:
         M = {fid: [round(float(p)) for p in model_for(fid, "wk").predict(fc)] for fid in FIDS}
         ieso7 = ieso
         try:                                           # the dated daily report files cover the days ahead
+            if time.monotonic() - T0 > 240:
+                raise RuntimeError("skipped: this update was already running long")
             adeq7, info7 = fetch_adequacy(actual=dem, days=8, today=now)
             ieso7 = proj.combine_first(adeq7)
             note("IESO 7-day report files", True, info7)
