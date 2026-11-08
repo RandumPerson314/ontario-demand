@@ -47,11 +47,11 @@ BASE_LAG = {"h1": "dem_lag1", "h2": "dem_lag2", "wk": "dem_lag168"}   # demand e
 
 FAMILIES = {
     "gbm":   dict(kind="gbm",  demand=True,  label="Gradient boosting + recent demand"),
-    "gbm0":  dict(kind="gbm",  demand=False, label="Gradient boosting, weather only"),
+    "gbm0":  dict(kind="gbm",  demand=False, label="Gradient boosting, no demand"),
     "poly":  dict(kind="poly", demand=True,  label="Polynomial + recent demand"),
-    "poly0": dict(kind="poly", demand=False, label="Polynomial, weather only"),
+    "poly0": dict(kind="poly", demand=False, label="Polynomial, no demand"),
     "nn":    dict(kind="nn",   demand=True,  label="Neural network + recent demand"),
-    "nn0":   dict(kind="nn",   demand=False, label="Neural network, weather only"),
+    "nn0":   dict(kind="nn",   demand=False, label="Neural network, no demand"),
 }
 
 POLY_CORE = ["temp", "h_s1", "h_c1", "h_s2", "h_c2", "nonwork", "solar"]   # full polynomial terms
