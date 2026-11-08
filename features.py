@@ -3,6 +3,7 @@ import io
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from xml.etree import ElementTree
 
 import holidays
@@ -180,7 +181,7 @@ def fetch_demand(years):
 
     IESO reports are in Eastern *Standard* Time all year (no daylight saving),
     so EST = UTC - 5 always. NOTE: IESO updates these yearly files only about once a day,
-    so they lag by up to ~30 hours; recent hours come from fetch_multiday()."""
+    so they lag by up to ~30 hours; recent hours come from fetch_recent_hours()."""
     out = []
     for y in years:
         try:
@@ -229,63 +230,58 @@ def fetch_live_demand():
     return {**rows[-1], "rows": rows, "hour_start": base}
 
 
-MULTIDAY_URL = "https://www.ieso.ca/-/media/Files/IESO/Power-Data/Ontario-Demand-multiday.ashx"
-CAL_FILE = "data/multiday_cal.json"
+RT_HOURLY = "https://reports-public.ieso.ca/public/RealtimeTotals/PUB_RealtimeTotals_{}.xml"
+RECENT_FILE = "data/recent_hours.json"
 
 
-def fetch_multiday(csv):
-    """IESO's own hourly chart feed: recent hourly *actual* demand (fresh, unlike the yearly
-    file) and IESO's *projected* (official forecast) demand. Its clock convention is not
-    documented, so we compare it with the official hourly file to work out the alignment."""
-    r = requests.get(MULTIDAY_URL, timeout=25)
+def _rt_hour(u):
+    """Average Ontario demand of one completed hour (naive UTC start) from IESO's dated 5-minute report
+    for that hour (named by EST date + hour ending). None unless all 12 readings are there."""
+    est = u - pd.DateOffset(hours=5)
+    r = requests.get(RT_HOURLY.format(est.strftime("%Y%m%d") + f"{est.hour + 1:02d}"), timeout=20)
+    if r.status_code == 404:
+        return None
     r.raise_for_status()
-    root = ElementTree.fromstring(r.content)
     tag = lambda e: e.tag.split("}")[-1]
-    start = pd.Timestamp(next(e.text for e in root.iter() if tag(e) == "StartDate"))
-    series = {}
-    for ds in root.iter():
-        if tag(ds) == "DataSet":
-            series[ds.get("Series")] = np.array([float(v.text) if v.text and v.text.strip() else np.nan
-                                                 for v in ds.iter() if tag(v) == "Value"])
-    pick = lambda *keys: next((v for k, v in series.items() if k and any(x in k.lower() for x in keys)), None)
-    act, proj = pick("actual"), pick("project", "forecast")
-    if act is None:
-        raise RuntimeError(f"feed has no 'Actual' series (found: {list(series)})")
+    vals = [float(k["EnergyMW"]) for mq in ElementTree.fromstring(r.content).iter() if tag(mq) == "MQ"
+            for k in [{tag(c): c.text for c in mq}] if k.get("MarketQuantity") == "ONTARIO DEMAND"]
+    return round(sum(vals) / len(vals), 1) if len(vals) == 12 else None
 
-    def build(vals, name, shift):                      # every series gets its own length and clock
-        t = pd.DatetimeIndex(start + pd.to_timedelta(np.arange(len(vals)), unit="h"))
-        if name == "est":
-            base = t + pd.DateOffset(hours=5)
-        else:
-            base = (t.tz_localize(TORONTO, ambiguous="NaT", nonexistent="shift_forward")
-                     .tz_convert("UTC").tz_localize(None))
-        s = pd.Series(vals, index=base + pd.DateOffset(hours=shift))
-        return s[s.index.notna()]
 
-    best = None
-    for name in ("est", "local"):
-        for shift in (-1, 0, 1):
-            a = build(act, name, shift).dropna()
-            common = a.index.intersection(csv.index)
-            if len(common) >= 12:
-                err = float((a.loc[common] - csv.loc[common]).abs().mean())
-                if best is None or err < best[0]:
-                    best = (err, name, shift, len(common))
-    if best is None:                                   # no overlap with the daily file: reuse last calibration
-        if not os.path.exists(CAL_FILE):
-            raise RuntimeError("cannot calibrate the hourly feed (no overlap with the official hourly file)")
-        c = json.load(open(CAL_FILE))
-        best = (np.nan, c["name"], c["shift"], 0)
-    elif best[0] > 700:
-        raise RuntimeError(f"hourly feed disagrees with the official file (avg {best[0]:.0f} MW)")
-    else:
-        os.makedirs("data", exist_ok=True)
-        json.dump({"name": best[1], "shift": best[2]}, open(CAL_FILE, "w"))
-    err, name, shift, n = best
-    counts = ", ".join(f"{k}: {int(np.isfinite(v).sum())} values" for k, v in series.items())
-    return dict(cal=dict(name=name, shift=shift), actual=build(act, name, shift).dropna(),
-                projected=build(proj, name, shift).dropna() if proj is not None else pd.Series(dtype=float),
-                info=f"clock={name}, shift={shift}h, matched {n} h to the official file (avg diff {err:.0f} MW); series: {counts}")
+def fetch_recent_hours(csv, now, max_hours=72):
+    """Completed hours newer than the official yearly file (which IESO updates only about once a day),
+    from IESO's per-hour 5-minute reports; their hourly averages match the yearly file to within 1 MW.
+    Hours already read are cached in RECENT_FILE, so each one is downloaded once.
+    Returns (Series by naive UTC hour start, note)."""
+    start = max(csv.index.max() + pd.DateOffset(hours=1) if len(csv) else now, now - pd.DateOffset(hours=max_hours))
+    want = list(pd.date_range(start, now - pd.DateOffset(hours=1), freq="h"))
+    cache = json.load(open(RECENT_FILE)) if os.path.exists(RECENT_FILE) else {}
+    key = lambda u: u.strftime("%Y-%m-%dT%H:00")
+    todo = [u for u in want if key(u) not in cache]
+    errors = []
+
+    def get(u):
+        try:
+            return u, _rt_hour(u)
+        except Exception as e:
+            errors.append(f"{key(u)}: {str(e)[:60]}")
+            return u, None
+    with ThreadPoolExecutor(8) as pool:
+        for u, v in pool.map(get, todo):
+            if v is not None:
+                cache[key(u)] = v
+    oldest = key(now - pd.DateOffset(hours=max_hours + 24))
+    cache = {k: v for k, v in sorted(cache.items()) if k >= oldest}
+    os.makedirs("data", exist_ok=True)
+    json.dump(cache, open(RECENT_FILE, "w"), indent=0)
+    s = pd.Series({u: cache[key(u)] for u in want if key(u) in cache}, dtype=float)
+    s.index = pd.DatetimeIndex(s.index)
+    note = (f"{len(s)}/{len(want)} hours after the yearly file" +
+            (f", newest {s.index.max().tz_localize('UTC').tz_convert(TORONTO).strftime('%m-%d %H:00')} Toronto time" if len(s) else "") +
+            (f" (first problem: {errors[0]})" if errors else ""))
+    if want and not len(s):
+        raise RuntimeError("no completed hours found" + (f": {errors[0]}" if errors else ""))
+    return s, note
 
 
 ADEQUACY_BASE = "https://reports-public.ieso.ca/public/Adequacy3/"
@@ -404,7 +400,7 @@ def fetch_adequacy(actual=None, days=0, today=None):
 
 
 def merge_demand(csv, extra, now):
-    """Official hourly file where it exists, plus fresher completed hours from the live feed."""
+    """Official hourly file where it exists, plus fresher completed hours from the 5-minute reports."""
     if extra is None or extra.empty:
         return csv
     e = extra[(extra.index < now) & ~extra.index.isin(csv.index)]
