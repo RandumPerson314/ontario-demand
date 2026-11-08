@@ -1,6 +1,6 @@
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><script src="nav.js"></script>
-<title>Ontario electricity demand: welcome</title>
+<title>Ontario demand forecasts</title>
 <style>
 :root{--bg:#fff;--fg:#1d2733;--mut:#6b7785;--card:#f4f6f9;--ac:#d9480f;--bd:#dde2e8}
 @media(prefers-color-scheme:dark){:root{--bg:#14181d;--fg:#e6eaee;--mut:#8b96a3;--card:#1e242b;--bd:#313a44}}
@@ -24,29 +24,41 @@ li{margin:5px 0}
 .mc a{color:var(--fg);font-weight:700;text-decoration:none}.mc a:hover{text-decoration:underline}
 .mc table{width:100%;border-collapse:collapse;margin-top:6px;font-size:13px}.mc td{padding:3px 0}.mc td+td{text-align:right;font-weight:700;font-size:16px}
 .mc small{color:var(--mut);font-size:11px}canvas{width:100%;height:230px;display:block}h3{font-size:15px;margin:0 0 6px}
+.now{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 22px;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px 14px;margin:14px 0}
+.now .nl{font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}.now b{font-size:19px}.now small{color:var(--mut);font-size:12px;margin-left:6px}
+.now .ie b{color:#7048e8}@media(prefers-color-scheme:dark){.now .ie b{color:#a78bfa}}
+.tw{overflow-x:auto}.lb{width:100%;border-collapse:collapse;font-size:14px}.lb th{text-align:right;font-weight:600;color:var(--mut);font-size:12px;padding:4px 8px;border-bottom:1px solid var(--bd);vertical-align:bottom}
+.lb th:nth-child(-n+2){text-align:left}.lb td{padding:7px 8px;border-bottom:1px solid var(--bd);text-align:right;white-space:nowrap}.lb td:nth-child(2){text-align:left;white-space:normal}
+.lb td:first-child{color:var(--mut);font-weight:700;width:1.5em;text-align:left}.lb a{color:var(--fg);font-weight:600;text-decoration:none}.lb a:hover{text-decoration:underline}
+.lb small{color:var(--mut);font-size:11px}.lb tr.top td{background:rgba(250,176,5,.13)}.lb tr.top td:first-child::after{content:" \2605";color:#f59f00}
+.lb tr.ieso td{background:rgba(112,72,232,.08)}.lb .tag{border:1px solid var(--bd);border-radius:6px;padding:0 5px}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:7px}.bar{height:4px;background:var(--bd);border-radius:2px;margin-top:3px}.bar i{display:block;height:100%;border-radius:2px}
+.lg{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0}.chip{font:12px system-ui,sans-serif;color:var(--fg);background:var(--bg);border:1px solid var(--bd);border-radius:20px;padding:3px 10px 3px 8px;cursor:pointer;opacity:.45}
+.chip.on{opacity:1}.chip i{display:inline-block;width:16px;height:0;border-top:3px solid var(--c);vertical-align:middle;margin-right:6px}.chip.dash i{border-top-style:dashed}
+span.chip{cursor:default}@media(max-width:560px){.lb .nx,.lb .d1{display:none}.lb td,.lb th{padding:6px 4px}}
 </style></head><body><main>
-<h1>Ontario electricity demand</h1>
-<p class="lead">Live predictions of how much electricity Ontario will use, checked against the real numbers from the IESO (the province's grid operator) every hour.</p>
+<h1>Six models vs. Ontario's grid operator</h1>
+<p class="lead">Every hour, six forecasting models predict how much electricity Ontario will use, before the hour happens. Each prediction is then scored against the real number, alongside the official forecast from the IESO (the province's grid operator). Who's winning?</p>
 
 <div id="banner" class="warn" style="display:none"></div>
 
-<h2>Ontario demand right now</h2>
-<div class="cards">
-<div class="card"><span>Most recent completed hour</span><b id="hA">-</b><small id="hAt"></small></div>
-<div class="card"><span>This hour so far (live)</span><b id="hL">-</b><small id="hLt"></small></div>
-<div class="card ieso"><span>IESO official forecast: next hour</span><b id="hI">-</b><small id="hIt"></small></div>
-<div class="card ieso"><span>IESO official forecast: this hour</span><b id="hJ">-</b><small id="hJt"></small></div></div>
-<div class="panel"><h3>Hour by hour: the last 24 hours</h3><canvas id="tr"></canvas>
-<p>Dark line = actual demand in each completed hour (it updates on the hour, not every few minutes); the hollow dot is the current hour so far; purple = the IESO's forecast for each hour. Times are Toronto time.</p></div>
+<div class="now"><span class="nl">Right now</span>
+<div><b id="hL">-</b><small id="hLt"></small></div>
+<div><b id="hA">-</b><small id="hAt"></small></div>
+<div class="ie"><b id="hI">-</b><small id="hIt"></small></div></div>
 
-<h2>What every model predicts</h2>
-<p>Predicted demand for the hour on the clock now and the one after it. Click a model's name for its own page, with a 7-day forecast and an explorer. The row at the bottom is the IESO's official forecast, the benchmark to beat.</p>
-<div class="mgrid" id="mg"></div>
-<p><a href="compare.html">See how all of them compare on accuracy &rarr;</a></p>
+<h2>Leaderboard</h2>
+<div class="tw"><table id="lb" class="lb"></table></div>
+<p class="mut" id="lbs"></p>
+
+<div class="panel"><h3>The last 24 hours: every forecast against what really happened</h3><canvas id="tr"></canvas>
+<div class="lg" id="lg"></div>
+<p class="mut">The thick dark line is actual demand (the hollow dot is the current hour so far). Each coloured line is one forecaster's this-hour prediction: solid for models shown recent demand, dashed for models that only see the weather and the calendar, purple for the IESO. Click a name to hide or show its line. Times are Toronto time.</p></div>
+<p>Click any model's name for its own page, with a 7-day forecast and an explorer. <a href="compare.html">Full accuracy comparison &rarr;</a></p>
 
 <h2>The quick tour</h2>
 <ol>
-<li><b>Start at the top of this page.</b> It shows Ontario's actual demand hour by hour, the IESO's official forecast, and what each of the six models predicts for the current hour and the next one, all in megawatts (MW).</li>
+<li><b>Start with the leaderboard.</b> It ranks the six models and the IESO's official forecast by how far off they have been, and shows what each one predicts for the current hour and the next one, all in megawatts (MW). The chart below it shows every forecast against what really happened over the last 24 hours.</li>
 <li><b>Open a model.</b> Every model page looks the same: this-hour and next-hour predictions, a 7-day forecast, a graph of past predictions against what happened, and an explorer. Use the Models menu at the top to switch between them.</li>
 <li><b>Click anywhere on a 7-day forecast line.</b> That picks an hour. The explorer at the bottom of the page then shows what pushes demand up or down at that hour for that model.</li>
 <li><b>Try the sliders.</b> Make it 10&deg; warmer, cut the cloud cover, or turn the day into a holiday, and watch the prediction change instantly. Polynomial models also show their full written-out equation.</li>
@@ -57,7 +69,7 @@ li{margin:5px 0}
 <dl>
 <dt>This hour / Next hour</dt><dd>Predictions for the hour on the clock now and the one after it. Times are Toronto time and each hour is labelled by when it starts, so "15:00" means 3:00 to 4:00 pm. The small grey text says which model made the number.</dd>
 <dt>Actual demand this hour (so far)</dt><dd>The average of the grid operator's 5-minute readings since the hour began, so it is a like-for-like comparison with an hourly prediction. Early in the hour it is based on only a few readings and can still move. The percentage shows how far the prediction is from it.</dd>
-<dt>Last completed hour</dt><dd>Actual demand for the hour that just ended. It comes from the IESO's live hourly feed; the IESO's official daily file only catches up about a day later, and the page switches to it automatically. If it isn't available yet the box says so instead of showing an older hour.</dd>
+<dt>Last completed hour</dt><dd>Actual demand for the hour that just ended. It is the average of the IESO's 5-minute readings for that hour, which match its official hourly file (published about a day later) to within 1 MW; the site switches to the official number once it appears. In the first few minutes after the hour it may not be in yet, and the box then shows the newest hour on record, marked as delayed.</dd>
 <dt>Accuracy</dt><dd>The typical size of the this-hour model's miss over the last 7 days (mean absolute error, in MW, and as a percentage of demand).</dd>
 <dt>Prediction vs actual graph</dt><dd>Orange is what the model predicted, dark is what really happened. Solid dots were predicted before the hour began; hollow dots were calculated afterwards from past data, so they are a little less honest as a test.</dd>
 </dl>
@@ -84,7 +96,7 @@ li{margin:5px 0}
 <li><b>Demand:</b> the IESO's public reports (hourly history and 5-minute live readings).</li>
 <li><b>Weather:</b> Open-Meteo, averaged over seven Ontario cities weighted roughly by population.</li>
 <li><b>The IESO's forecast:</b> the grid operator's published hourly forecast, saved before each hour so it can be scored fairly.</li>
-<li><b>Updates:</b> an automatic job runs about every 15 minutes and publishes new numbers. These pages reload their data every 5 minutes on their own, so you can leave them open.</li>
+<li><b>Updates:</b> an automatic job runs about every 10 minutes and publishes new numbers. These pages reload their data every 5 minutes on their own, so you can leave them open.</li>
 </ul>
 
 <h2>If something looks wrong</h2>
