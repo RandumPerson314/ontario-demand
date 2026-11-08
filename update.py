@@ -13,7 +13,7 @@ import pandas as pd
 
 import features as ft
 from features import (FAMILIES, TORONTO, fetch_adequacy, fetch_demand, fetch_live,
-                      fetch_live_demand, fetch_multiday, make_features, merge_demand, variants)
+                      fetch_live_demand, fetch_recent_hours, make_features, merge_demand, variants)
 
 LOG, FC_FILE, ARCH = "docs/demand_log.js", "docs/forecast.js", "docs/forecast_archive.js"
 KEEP = 24 * 14
@@ -83,20 +83,19 @@ nxt = now + pd.DateOffset(hours=1)
 csv = fetch_demand([now.year - 1, now.year])
 note("IESO hourly file", len(csv) > 0, f"newest hour {local_label(csv.index.max())} Toronto time" if len(csv) else "no data")
 
-multi, proj, adeq = None, pd.Series(dtype=float), pd.Series(dtype=float)
+recent, adeq = None, pd.Series(dtype=float)
 try:
-    multi = fetch_multiday(csv)
-    proj = multi["projected"]
-    note("IESO live hourly feed", True, multi["info"])
+    recent, info = fetch_recent_hours(csv, now)
+    note("IESO recent hours (5-minute reports)", True, info)
 except Exception as e:
-    note("IESO live hourly feed", False, e)
-dem = merge_demand(csv, multi["actual"] if multi else None, now)
+    note("IESO recent hours (5-minute reports)", False, e)
+dem = merge_demand(csv, recent, now)
 try:
     adeq, info = fetch_adequacy(actual=dem)
     note("IESO forecast report", True, info)
 except Exception as e:
     note("IESO forecast report", False, e)
-ieso = proj.combine_first(adeq)                    # IESO's official forecast: short-range feed, then the adequacy report
+ieso = adeq                                        # IESO's official forecast (the adequacy report)
 try:
     weather = fetch_live()
     note("Weather (Open-Meteo)", ft.LIVE_STATUS["ok"], ft.LIVE_STATUS["detail"])
@@ -135,14 +134,7 @@ for fid in FIDS:
 for idx, key in ((now, "ieso_h"), (nxt, "ieso_n")):    # IESO's forecast, captured when it was a genuine forecast
     if idx in ieso.index and idx in F.index and not np.isnan(ieso[idx]) and get_row(idx)[key] is None:
         log[ukey(idx)][key] = round(float(ieso[idx]), 1)
-for idx in win.index:                                  # past hours: the IESO's own published projection (its chart feed keeps ~5 days)
-    if idx < now and idx in proj.index and not np.isnan(proj[idx]):
-        r = get_row(idx)
-        for key in ("ieso_h", "ieso_n"):
-            if r[key] is None:
-                r[key] = round(float(proj[idx]), 1)
-
-for r in log.values():                                 # actuals: official hourly file first, then the live feed
+for r in log.values():                                 # actuals: official hourly file first, then the 5-minute reports
     ts = pd.Timestamp(r["u"])
     if ts in dem.index:
         r["actual"] = float(dem[ts])
@@ -160,10 +152,8 @@ try:   # average of the 5-minute readings so far in the current IESO hour (IESO 
 except Exception as e:
     note("IESO 5-minute readings", False, e)
 meta["status"] = status
-if multi:
-    meta["feed_cal"] = multi["cal"]                  # lets the website's browser code read the same IESO feed
 meta["ieso_hours"] = sum(1 for r in rows if r.get("ieso_n") is not None)
-meta["ieso_source"] = ("live feed projection" if len(proj) else "") + (" + adequacy report" if len(adeq) else "") or "none"
+meta["ieso_source"] = "adequacy report" if len(adeq) else "none"
 write_log(rows, meta)
 cur = next((r for r in rows if r["u"] == ukey(now)), None)
 print("this hour:", {k: cur[k] for k in KEYS if cur and cur[k] is not None} if cur else None)
@@ -183,7 +173,7 @@ else:
             if time.monotonic() - T0 > 240:
                 raise RuntimeError("skipped: this update was already running long")
             adeq7, info7 = fetch_adequacy(actual=dem, days=8, today=now)
-            ieso7 = proj.combine_first(adeq7)
+            ieso7 = adeq7
             note("IESO 7-day report files", True, info7)
         except Exception as e:
             note("IESO 7-day report files", False, e)
