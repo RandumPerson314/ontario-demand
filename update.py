@@ -91,7 +91,7 @@ except Exception as e:
     note("IESO recent hours (5-minute reports)", False, e)
 dem = merge_demand(csv, recent, now)
 try:
-    adeq, info = fetch_adequacy(actual=dem)
+    adeq, info = fetch_adequacy(actual=dem, days=2, today=now)   # the undated report is for a day weeks ahead; today's and tomorrow's dated files cover now
     note("IESO forecast report", True, info)
 except Exception as e:
     note("IESO forecast report", False, e)

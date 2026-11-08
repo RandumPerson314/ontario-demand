@@ -369,8 +369,9 @@ def _choose(groups, actual):
 
 
 def fetch_adequacy(actual=None, days=0, today=None):
-    """IESO's Adequacy Report: its hourly demand forecast. The newest report covers the current day; with
-    days>0 the dated daily files for the coming days are added too. Returns (Series by naive UTC hour start, note)."""
+    """IESO's Adequacy Report: its hourly demand forecast. The undated newest report is for the furthest delivery
+    day published (weeks ahead), so pass days>0 to add the dated daily files from `today` on (days=2: today and
+    tomorrow, EST). Returns (Series by naive UTC hour start, note)."""
     r = requests.get(ADEQUACY_BASE + "PUB_Adequacy3.xml", timeout=30)
     r.raise_for_status()
     score, path, s, med = _choose(_adequacy_groups(r.content, outline=True), actual)
