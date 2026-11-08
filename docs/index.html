@@ -37,9 +37,7 @@ li{margin:5px 0}
 .chip.on{opacity:1}.chip i{display:inline-block;width:16px;height:0;border-top:3px solid var(--c);vertical-align:middle;margin-right:6px}.chip.dash i{border-top-style:dashed}
 span.chip{cursor:default}@media(max-width:560px){.lb .nx,.lb .d1{display:none}.lb td,.lb th{padding:6px 4px}}
 </style></head><body><main>
-<h1>Six models vs. Ontario's grid operator</h1>
-<p class="lead">Every hour, six forecasting models predict how much electricity Ontario will use, before the hour happens. Each prediction is then scored against the real number, alongside the official forecast from the IESO (the province's grid operator). Who's winning?</p>
-
+<h1>Ontario Power Demand Prediction</h1>
 <div id="banner" class="warn" style="display:none"></div>
 
 <div class="now"><span class="nl">Right now</span>
@@ -47,11 +45,11 @@ span.chip{cursor:default}@media(max-width:560px){.lb .nx,.lb .d1{display:none}.l
 <div><b id="hA">-</b><small id="hAt"></small></div>
 <div class="ie"><b id="hI">-</b><small id="hIt"></small></div></div>
 
-<h2>Leaderboard</h2>
+<h2>Different Models' Perfromance</h2>
 <div class="tw"><table id="lb" class="lb"></table></div>
 <p class="mut" id="lbs"></p>
 
-<div class="panel"><h3>The last 24 hours: every forecast against what really happened</h3><canvas id="tr"></canvas>
+<div class="panel"><h3>The last 24 hours:</h3><canvas id="tr"></canvas>
 <div class="lg" id="lg"></div>
 <p class="mut">The thick dark line is actual demand (the hollow dot is the current hour so far). Each coloured line is one forecaster's this-hour prediction: solid for models shown recent demand, dashed for models that only see the weather and the calendar, purple for the IESO. Click a name to hide or show its line. Times are Toronto time.</p></div>
 <p>Click any model's name for its own page, with a 7-day forecast and an explorer. <a href="compare.html">Full accuracy comparison &rarr;</a></p>
