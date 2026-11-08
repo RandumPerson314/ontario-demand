@@ -37,7 +37,7 @@ CALENDAR = ["hour", "dow", "month", "doy", "hol", "hol_before", "hol_after", "xm
 #   h1 = "this hour"  (knows demand through the previous hour)
 #   h2 = "next hour"  (knows demand through the hour before that)
 #   wk = "7-day"      (knows demand only from a week or more earlier)
-# Weather-only models have a single variant, "all".
+# No-demand models have a single variant, "all".
 DEMAND_COLS = {
     "h1": [f"dem_lag{k}" for k in (1, 2, 3, 24, 48, 168)] + ["dem_roll24_h1", "dem_trend_h1"],
     "h2": [f"dem_lag{k}" for k in (2, 3, 4, 24, 48, 168)] + ["dem_roll24_h2", "dem_trend_h2"],

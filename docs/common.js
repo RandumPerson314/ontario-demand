@@ -21,15 +21,15 @@ function plot(c,xs,S,o={}){
 const MODELS={
  gbm:{n:"Gradient boosting + recent demand",c:"#d9480f",page:"dashboard.html",demand:true,
   d:"A team of hundreds of small decision trees, each one correcting the mistakes of the ones before it. Besides the weather and the calendar it is shown recent demand: the last few hours for the this-hour and next-hour predictions, and demand from a week or two earlier for the 7-day forecast."},
- gbm0:{n:"Gradient boosting, weather only",c:"#f08c00",page:"gbm_weather.html",demand:false,
+ gbm0:{n:"Gradient boosting, no demand",c:"#f08c00",page:"gbm_weather.html",demand:false,
   d:"The same decision-tree technique, but it is never shown any demand numbers at all, only the weather and the calendar. Comparing it with its sibling shows how much knowing recent demand really helps."},
  poly:{n:"Polynomial + recent demand",c:"#1971c2",page:"poly_demand.html",demand:true,
   d:"One fixed formula (a polynomial: sums of products of the inputs) fitted to history. Its terms combine temperature, time of day, sunshine and workday-or-not, and it also has terms for recent demand, so it can follow how demand has been running lately."},
- poly0:{n:"Polynomial, weather only",c:"#4dabf7",page:"polynomial.html",demand:false,
+ poly0:{n:"Polynomial, no demand",c:"#4dabf7",page:"polynomial.html",demand:false,
   d:"The same kind of formula using only the weather and the calendar, never recent demand. Its full equation and a set of sliders are on its page."},
  nn:{n:"Neural network + recent demand",c:"#2f9e44",page:"nn_demand.html",demand:true,
   d:"A small neural network (layers of weighted sums with a bend between them), trained with PyTorch and averaged over several training runs. It is shown recent demand as well as the weather and the calendar."},
- nn0:{n:"Neural network, weather only",c:"#74b816",page:"nn_weather.html",demand:false,
+ nn0:{n:"Neural network, no demand",c:"#74b816",page:"nn_weather.html",demand:false,
   d:"The same kind of neural network, but with no demand numbers as input, only the weather and the calendar."}};
 const IESO={n:"IESO official forecast",c:"#7048e8"},MIDS=Object.keys(MODELS);
 

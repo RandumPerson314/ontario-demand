@@ -1,7 +1,7 @@
 (function(){
- const models=[["dashboard.html","Gradient boosting + recent demand"],["gbm_weather.html","Gradient boosting, weather only"],
-  ["poly_demand.html","Polynomial + recent demand"],["polynomial.html","Polynomial, weather only"],
-  ["nn_demand.html","Neural network + recent demand"],["nn_weather.html","Neural network, weather only"]];
+ const models=[["dashboard.html","Gradient boosting + recent demand"],["gbm_weather.html","Gradient boosting, no demand"],
+  ["poly_demand.html","Polynomial + recent demand"],["polynomial.html","Polynomial, no demand"],
+  ["nn_demand.html","Neural network + recent demand"],["nn_weather.html","Neural network, no demand"]];
  const here=location.pathname.split("/").pop()||"index.html",onModel=models.some(m=>m[0]==here);
  const st=document.createElement("style");
  st.textContent="nav.site{display:flex;gap:4px;flex-wrap:wrap;align-items:center;padding:8px 16px;border-bottom:1px solid var(--bd);background:var(--card);font:14px system-ui,sans-serif;position:sticky;top:0;z-index:5}"+
