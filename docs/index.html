@@ -70,7 +70,7 @@ li{margin:5px 0}
 </ul>
 
 <h2>The six models in plain language</h2>
-<p>Every model comes in two flavours. <b>"+ recent demand"</b> models are shown how much electricity Ontario used in the last few hours (or, for the 7-day forecast, a week or two ago), which makes them very accurate for the next hour or two. <b>"Weather only"</b> models see just the weather and the calendar (hour, weekday, holidays, season) and never any demand figures, so they show how far weather alone can take you. There are three techniques:</p>
+<p>Every model comes in two flavours. <b>"+ recent demand"</b> models are shown how much electricity Ontario used in the last few hours (or, for the 7-day forecast, a week or two ago), which makes them very accurate for the next hour or two. <b>", no demand"</b> models see just the weather and the calendar (hour, weekday, holidays, season) and never any demand figures, so they show how far weather alone can take you. There are three techniques:</p>
 <div class="box"><b>Polynomial.</b> One fixed mathematical formula that turns the inputs into a demand number. Everything it does is visible on its page, down to every coefficient.</div>
 <div class="box"><b>Gradient boosting.</b> A team of hundreds of small decision trees, each correcting the mistakes of the ones before it. Good at sharp effects such as holidays and the morning ramp.</div>
 <div class="box"><b>Neural network.</b> Layers of simple weighted sums with a bend between them, trained with PyTorch and averaged over several training runs. It can learn smooth, complicated patterns but, unlike the polynomial, can't be read as a single formula.</div>
