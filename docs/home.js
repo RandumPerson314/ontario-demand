@@ -48,8 +48,8 @@
     return`<tr class="${e.ieso?"ieso":""}${pos===1?" top":""}"><td>${pos}</td><td><span class="sw" style="background:${e.c}"></span><a href="${e.page}">${e.n}</a>${e.ieso?' <small class="tag">benchmark</small>':""}</td>
      <td>${a==null?"-":MW(a)+as}</td><td class="nx">${b==null?"-":MW(b)+bs}</td><td class="d1">${miss(d1[e.id])}</td><td>${miss(d7[e.id],1,e.c)}</td></tr>`}).join("")+"</tbody>";
   const ie7=d7.ieso,beat=ie7&&ie7.n>=12?MIDS.filter(id=>d7[id]&&d7[id].mae<ie7.mae).length:null;
-  $("lbs").innerHTML=(beat==null?"The IESO's forecast is saved each hour as it is published; it will be ranked once it has 12 scored hours.")+
-    :`Ranked by average miss over the last 7 days (lower is better). `+(d7.live?"Models are scored only on predictions made before each hour began."
+  $("lbs").innerHTML=(beat==null?"The IESO's forecast is saved each hour as it is published; it will be ranked once it has 12 scored hours."
+    : `Ranked by average miss over the last 7 days (lower is better).`) +(d7.live?"Models are scored only on predictions made before each hour began."
     :"Not every model has 12 hours of predictions made in advance yet, so the scores also include hours filled in afterwards from past data, which flatters the models a little.")+
    (order.some(e=>!e.ieso&&[cell(e,"_h",t0)[1],cell(e,"_n",t0+H)[1]].includes("*"))?" * from the model's 7-day forecast run, used until its hourly run is available.":"");
 
