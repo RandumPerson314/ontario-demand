@@ -115,10 +115,19 @@ def get_row(idx):
     return log[k]
 
 
+WALL = pd.Timestamp.now(tz="UTC").tz_localize(None)    # when this run happened (for the logs page)
+
+
+def stamp(row, key):
+    """Remember when a value was saved: minutes after the start of the row's hour (negative = before the hour)."""
+    row.setdefault("at", {})[key] = int((WALL - pd.Timestamp(row["u"])).total_seconds() // 60)
+
+
 def fill(row, key, value, live):
     """Store a prediction once (they are frozen); one not made on time marks the row as retrospective."""
     if row[key] is None:
         row[key] = round(float(value), 1)
+        stamp(row, key)
         if not live:
             row["bf"] = 1
 
@@ -133,11 +142,16 @@ for fid in FIDS:
                 fill(get_row(idx), fid + suffix, p, idx == end)
 for idx, key in ((now, "ieso_h"), (nxt, "ieso_n")):    # IESO's forecast, captured when it was a genuine forecast
     if idx in ieso.index and idx in F.index and not np.isnan(ieso[idx]) and get_row(idx)[key] is None:
-        log[ukey(idx)][key] = round(float(ieso[idx]), 1)
+        r = log[ukey(idx)]
+        r[key] = round(float(ieso[idx]), 1)
+        stamp(r, key)
+        if idx in ft.ADEQ_SRC:                         # the IESO file the number was read from
+            r.setdefault("f", {})[key] = ft.ADEQ_SRC[idx]
 for r in log.values():                                 # actuals: official hourly file first, then the 5-minute reports
     ts = pd.Timestamp(r["u"])
     if ts in dem.index:
         r["actual"] = float(dem[ts])
+        r["src"] = "csv" if ts in csv.index else "5min"      # yearly file, or the hour's 5-minute report
 rows = sorted(log.values(), key=lambda r: r["u"])[-KEEP:]
 
 # ---------------------------------------------------------------- live demand so far this hour

@@ -13,7 +13,8 @@
  const n=document.createElement("nav");n.className="site";
  n.innerHTML=`<a href="index.html"${here=="index.html"?' class="on"':""}>Home</a>
  <details><summary${onModel?' class="on"':""}>Models &#9662;</summary><div class="menu">${models.map(([h,t])=>`<a href="${h}"${h==here?' class="on"':""}>${t}</a>`).join("")}</div></details>
- <a href="compare.html"${here=="compare.html"?' class="on"':""}>Comparison</a>`;
+ <a href="compare.html"${here=="compare.html"?' class="on"':""}>Comparison</a>
+ <a href="logs.html"${here=="logs.html"?' class="on"':""}>Logs</a>`;
  document.addEventListener("click",e=>{const d=n.querySelector("details");if(d&&!d.contains(e.target))d.open=false});
  document.addEventListener("DOMContentLoaded",()=>document.body.prepend(n));
 })();
