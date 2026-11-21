@@ -20,7 +20,7 @@ table.log tr.day td{background:var(--card);font-weight:700;text-align:left;posit
 
 <div class="ctl2">
  <label>Day <select id="day"></select></label>
- <label>Predictions <select id="kind"><option value="_h">this-hour (made during the hour)</option><option value="_n">next-hour (made the hour before)</option></select></label>
+ <label>Predictions <select id="kind"><option value="_h">this-hour (made during the hour)</option><option value="_n">next-hour (made the hour before)</option><option value="_i">at the IESO's time (newest made when the IESO published)</option></select></label>
  <label><input type="checkbox" id="diff" checked> show miss vs actual</label>
  <button id="dl">Download everything (CSV)</button>
 </div>
@@ -32,6 +32,7 @@ table.log tr.day td{background:var(--card);font-weight:700;text-align:left;posit
 <p class="hint"><b>Hour</b> is Toronto time, labelled by when the hour starts ("14:00" = 2:00 to 3:00 pm). The IESO labels the same hour by its <b>date and "hour ending" in Eastern Standard Time</b> all year (EST, no daylight saving), shown under each hour: in winter "14:00" Toronto is <i>hour ending 15</i>; in summer (EDT) it is <i>hour ending 14</i>. Use that date and hour ending when looking a number up in an IESO file.</p>
 <p class="hint"><b>Actual</b>: the source says which IESO file it came from. <span class="k">yearly file</span> = the official hourly file (IESO adds each day about a day later). <span class="k">5-min report</span> = the average of the 12 five-minute readings in that hour's own report, used until the yearly file catches up (the two agree to within about 1 MW).</p>
 <p class="hint"><b>IESO forecast</b>: the value saved from the IESO's Adequacy report, with the exact file version and the time it was saved. <b>Model columns</b>: each model's saved prediction; the small number is its miss (prediction minus actual: red = too high, blue = too low). <b>Saved</b> is when the predictions were made, in Toronto time. <b>Timing</b> says whether every prediction in the row was made live (<i>on time</i>) or some were calculated later from past data (<i>after the fact</i>, e.g. when an update didn't run).</p>
+<p class="hint"><b>At the IESO's time</b>: for each hour, the time the IESO <i>first</i> published the forecast number the site scored (the earliest of an unbroken run of report versions with that same value; IESO republishes every 30 minutes, often without changing a given hour), and each model's newest prediction made at or before that moment, with where it came from (the hourly 7-day run, or the next-hour prediction if the IESO published within the last hour). Hours before 21 November 2026 were rebuilt from the site's own commit history and the IESO's archived report versions (<code>tools/backfill_ieso_times.py</code>).</p>
 <p class="hint">Rows saved before 20 November 2026 don't have save times or IESO file versions. For those, the link goes to the day's latest Adequacy file, which may be a newer version than the one the site read; the directory listing shows every version with its publication time.</p>
 </div>
 

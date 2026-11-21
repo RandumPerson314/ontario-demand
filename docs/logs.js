@@ -16,30 +16,35 @@
   return link(BASE+`Demand/PUB_Demand_${yr}.csv`,"yearly file")+(recent?" · "+link(BASE+"RealtimeTotals/"+f5,"5-min"):"")}
  function iesoCell(r,k){
   const v=r[k];if(v==null)return"-";const e=est(r.u),f=r.f&&r.f[k],t=savedAt(r,k);
-  if(!f&&!t)return`${MW(v)}${miss(v,r.actual)}<small>${link(BASE+`Adequacy3/PUB_Adequacy3_${e.date.replace(/-/g,"")}.xml`,"day's file")} · version not recorded</small>`;
+  if(!f&&!t)return`${MW(v)}${miss(v,r.actual)}<small>${link(BASE+`Adequacy3/PUB_Adequacy3_${e.date.replace(/-/g,"")}.xml`,"day's file")} · version not recorded</small>`+firstPub(r,k);
   const file=f?link(BASE+"Adequacy3/"+f,f.replace("PUB_Adequacy3_","").replace(".xml","")):link(BASE+`Adequacy3/PUB_Adequacy3_${e.date.replace(/-/g,"")}.xml`,"day's file");
-  return`${MW(v)}${miss(v,r.actual)}<small>${file}${t?" · saved "+clock(t)+" ("+rel(r.at[k])+")":""}</small>`}
+  return`${MW(v)}${miss(v,r.actual)}<small>${file}${t?" · saved "+clock(t)+" ("+rel(r.at[k])+")":""}</small>`+firstPub(r,k)}
+ /* when the IESO first published this number (the earliest version in an unbroken run with the same value) */
+ function firstPub(r,k){if(k!="ieso_h"||r.ip==null)return"";const t=Date.parse(r.u+":00Z")+r.ip*6e4;
+  return`<small>first published ${clock(t)} (${rel(r.ip)}${r.ipf?", or earlier":""}) in ${link(BASE+"Adequacy3/"+r.iv,r.iv.replace("PUB_Adequacy3_","").replace(".xml",""))}</small>`}
  function miss(v,a){if(!$("diff").checked||v==null||a==null)return"";const d=Math.round(v-a);
   return`<small class="${d>0?"pos":d<0?"neg":""}">${d>0?"+":""}${d.toLocaleString()}</small>`}
 
  function render(){
   banner();
-  const L=(window.LOG||[]).slice().reverse(),sfx=$("kind").value,day=$("day").value,k="ieso"+sfx;
+  const L=(window.LOG||[]).slice().reverse(),sfx=$("kind").value,day=$("day").value,k=sfx=="_i"?"ieso_h":"ieso"+sfx;
+  const val=(r,id)=>sfx=="_i"?(r.mi?r.mi[id]:null):r[id+sfx],made=(r,id)=>sfx=="_i"?(r.mim?r.mim[id]:null):r.at&&r.at[id+sfx];
   const rows=L.filter(r=>day=="all"||tor(r.u).slice(0,10)==day);
   let html=`<thead><tr><th>Hour (Toronto)<small>IESO date · hour ending (EST)</small></th><th>Actual<small>source</small></th>
-   <th>IESO forecast<small>${sfx=="_h"?"saved during the hour":"saved the hour before"}</small></th>`+
+   <th>IESO forecast<small>${sfx=="_n"?"saved the hour before":"saved during the hour"}</small></th>`+
    COLS.map(c=>`<th><span class="sw" style="background:${c.c}"></span>${c.n}</th>`).join("")+
-   `<th>Saved<small>models, Toronto time</small></th><th>Timing</th></tr></thead><tbody>`,last="";
+   `<th>${sfx=="_i"?"Made":"Saved"}<small>models, Toronto time</small></th><th>Timing</th></tr></thead><tbody>`,last="";
   for(const r of rows){
    const t=tor(r.u),e=est(r.u);
    if(day=="all"&&t.slice(0,10)!=last){last=t.slice(0,10);html+=`<tr class="day"><td colspan="${COLS.length+5}">${DOW[new Date(last+"T12:00:00").getDay()]} ${last}</td></tr>`}
-   const ts=COLS.map(c=>r.at&&r.at[c.id+sfx]).filter(x=>x!=null),lo=Math.min(...ts),hi=Math.max(...ts);
+   const ts=COLS.map(c=>made(r,c.id)).filter(x=>x!=null),lo=Math.min(...ts),hi=Math.max(...ts);
    const saved=ts.length?clock(Date.parse(r.u+":00Z")+lo*6e4)+(hi>lo?"–"+clock(Date.parse(r.u+":00Z")+hi*6e4):"")+`<small>${rel(lo)}${hi>lo?" to "+rel(hi):""}</small>`:"<small>not recorded</small>";
    html+=`<tr><td><b>${t.slice(11)}</b> ${t.slice(5,10)}<small>${e.date} · HE ${e.he}</small></td>
     <td>${r.actual==null?"<small>not in yet</small>":`<b>${MW(r.actual)}</b><small>${actualSrc(r)}</small>`}</td>
     <td>${iesoCell(r,k)}</td>`+
-    COLS.map(c=>{const v=r[c.id+sfx];return`<td>${v==null?"-":MW(v)+miss(v,r.actual)}</td>`}).join("")+
-    `<td>${saved}</td><td>${r.bf?"after the fact":"on time"}</td></tr>`}
+    COLS.map(c=>{const v=val(r,c.id),src=sfx=="_i"&&r.mis?({"7d":"7-day run",n:"next-hour",h:"this-hour"})[r.mis[c.id]]:"";
+     return`<td>${v==null?"-":MW(v)+miss(v,r.actual)+(src?`<small>${src}</small>`:"")}</td>`}).join("")+
+    `<td>${saved}</td><td>${sfx=="_i"?(r.mi?(r.mil?"some made after the IESO published (not scored)":"before the IESO published"):"<small>not recorded</small>"):r.bf?"after the fact":"on time"}</td></tr>`}
   $("tb").innerHTML=html+"</tbody>";
   const done=rows.filter(r=>r.actual!=null).length;
   $("cnt").textContent=`${rows.length} hours shown (${done} with actual demand). The site keeps the last 14 days; older hours are in the GitHub history.`}
@@ -52,10 +57,12 @@
  function csv(){
   const keys=MIDS.flatMap(id=>[id+"_h",id+"_n"]).concat(["ieso_h","ieso_n"]);
   const head=["hour_start_utc","hour_start_toronto","ieso_date_est","ieso_hour_ending","actual_mw","actual_source","timing"]
-   .concat(keys,keys.map(k=>k+"_saved_min_after_hour_start"),["ieso_h_file","ieso_n_file"]);
+   .concat(keys,keys.map(k=>k+"_saved_min_after_hour_start"),["ieso_h_file","ieso_n_file","ieso_h_first_published_min_after_hour_start","ieso_h_first_published_is_upper_bound","ieso_h_first_published_file"],
+    MIDS.map(id=>id+"_at_ieso_time"),MIDS.map(id=>id+"_at_ieso_time_made_min_after_hour_start"),MIDS.map(id=>id+"_at_ieso_time_source"),["at_ieso_time_not_scored"]);
   const q=v=>v==null?"":String(v);
   const lines=(window.LOG||[]).map(r=>{const e=est(r.u);return[r.u,tor(r.u),e.date,e.he,r.actual,r.actual==null?"":(r.src||"yearly or 5min (not recorded)"),r.bf?"after the fact":"on time"]
-   .concat(keys.map(k=>r[k]),keys.map(k=>r.at?r.at[k]:null),[r.f&&r.f.ieso_h,r.f&&r.f.ieso_n]).map(q).join(",")});
+   .concat(keys.map(k=>r[k]),keys.map(k=>r.at?r.at[k]:null),[r.f&&r.f.ieso_h,r.f&&r.f.ieso_n,r.ip,r.ip==null?null:r.ipf?1:0,r.iv],
+    MIDS.map(id=>r.mi?r.mi[id]:null),MIDS.map(id=>r.mim?r.mim[id]:null),MIDS.map(id=>r.mis?r.mis[id]:null),[r.mi?(r.mil?1:0):null]).map(q).join(",")});
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([[head.join(",")].concat(lines).join("\n")],{type:"text/csv"}));
   a.download="ontario-demand-log.csv";document.body.appendChild(a);a.click();a.remove()}
 

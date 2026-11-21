@@ -24,7 +24,8 @@ td.best{font-weight:700;color:var(--ac)}.lg label{display:inline-flex;align-item
 
 <div class="panel"><h2>2. Live results so far</h2>
 <p>Every prediction is saved before its hour happens, then scored against the IESO's actual demand. These use real weather forecasts, so expect them to be a little worse than the backtest. Models are scored on exactly the same hours so the comparison is fair.</p>
-<label style="display:block;margin:6px 0">Score <select id="incl"><option value="live">only predictions made before the hour started</option><option value="all">all hours, including ones calculated afterwards</option></select></label>
+<label style="display:block;margin:6px 0">Score <select id="incl"><option value="live">only predictions made live, on time</option><option value="all">all hours, including ones calculated afterwards</option></select></label>
+<div id="vsIeso"></div>
 <div id="live"></div>
 <h3>7-day forecast error by how far ahead</h3><div id="lead"></div><canvas id="cl"></canvas>
 <h3>Recent hours: next-hour forecasts</h3><canvas id="cr"></canvas>
@@ -33,7 +34,7 @@ td.best{font-weight:700;color:var(--ac)}.lg label{display:inline-flex;align-item
 <div class="panel"><h2>3. The 7-day forecasts side by side</h2><canvas id="cs"></canvas>
 <p>Where the lines pull apart, the models disagree. The IESO line only covers the part of the week its published forecast reaches.</p></div>
 
-<script src="demand_log.js"></script><script src="forecast.js"></script><script src="forecast_archive.js"></script><script src="backtest.js"></script>
+<script src="demand_log.js"></script><script src="forecast.js"></script><script src="forecast_archive.js"></script><script src="score_archive.js"></script><script src="backtest.js"></script>
 <script src="common.js"></script>
 <script>
 const ALL=[...MIDS,"ieso","naive"],SHOW=new Set(ALL);
@@ -63,8 +64,30 @@ function backtest(){
   if(ids.length)plot($(id),[...Array(24).keys()],ids.map(i=>({ys:B[task].by_hour[i],color:COL(i)})),{xf:x=>x+"h",nt:7})})}
 
 /* ---------- 2. live results ---------- */
+/* the whole-project archive, as log-style rows (falls back to the 14-day log until the archive exists) */
+function history(){
+ const A=window.ARC;if(!A||!A.rows.length)return window.LOG||[];
+ return A.rows.map(a=>{const r={u:a.u,actual:a.a,bf:a.bf,ieso_h:a.i,mil:a.ml};
+  A.ids.forEach((id,k)=>{r[id+"_h"]=a.h[k];r[id+"_n"]=a.n[k]});
+  if(a.m){r.mi={};A.ids.forEach((id,k)=>r.mi[id]=a.m[k])}return r})}
+/* everything against the IESO, on exactly the hours where the IESO's forecast and every model's
+   prediction at the IESO's time exist, so every line is scored on the same hours */
+function vsIeso(H){
+ const incl=$("incl").value=="all",ids=MIDS.filter(i=>SHOW.has(i));
+ const rows=H.filter(r=>r.actual!=null&&r.ieso_h!=null&&r.mi&&!r.mil&&MIDS.every(i=>r.mi[i]!=null));
+ if(!rows.length){$("vsIeso").innerHTML="<h3>Everything against the IESO</h3><p>Nothing to score yet.</p>";return}
+ const ent=[["IESO official forecast","benchmark",r=>r.ieso_h]].concat(
+  ids.map(i=>[NAME(i),"at IESO's time",r=>r.mi[i]]),ids.map(i=>[NAME(i),"next hour",r=>r[i+"_n"]]),ids.map(i=>[NAME(i),"hour of",r=>r[i+"_h"]]));
+ const R=ent.map(([n,k,g])=>{const e=rows.filter(r=>g(r)!=null&&(k=="benchmark"||k=="at IESO's time"||incl||!r.bf));
+  return[n,k,e.length,e.length?e.reduce((s,r)=>s+Math.abs(g(r)-r.actual),0)/e.length:null,e.length?100*e.reduce((s,r)=>s+Math.abs(g(r)-r.actual)/r.actual,0)/e.length:null]})
+  .sort((a,b)=>(a[3]??1e9)-(b[3]??1e9));
+ const ie=R.find(r=>r[1]=="benchmark")[3],beat=R.filter(r=>r[1]=="at IESO's time"&&r[3]<ie).length,t0=rows[0].u.slice(0,10),t1=rows[rows.length-1].u.slice(0,10);
+ $("vsIeso").innerHTML=`<h3>Everything against the IESO, whole project (${rows.length} hours, ${t0} to ${t1})</h3>`+
+  table(["Forecast","Kind","Hours scored","Avg error (MW)","Avg error (%)"],R,[3,4])+
+  `<p class="verdict">At the IESO's own time, <b>${beat} of ${ids.length}</b> models beat its forecast.</p>`+
+  `<p><b>At IESO's time</b>: the newest prediction the model had already made when the IESO first published the number it is scored on. <b>Next hour</b>: made during the hour before. <b>Hour of</b>: made in the first minutes of the hour. All are scored on the same hours: those with an IESO forecast and every model's prediction at its time.</p>`}
 function liveSection(){
- const L=window.LOG||[],incl=$("incl").value=="all",rows=L.filter(r=>r.actual!=null&&(incl||!r.bf));
+ const L=history(),incl=$("incl").value=="all",rows=L.filter(r=>r.actual!=null&&(incl||!r.bf));vsIeso(L);
  const mk=(suffix,title)=>{
   const ids=ALL.filter(i=>i!="naive"&&SHOW.has(i)),f=i=>i=="ieso"?"ieso"+suffix:i+suffix;
   let set=rows.filter(r=>ids.every(i=>r[f(i)]!=null)),note="";
@@ -73,8 +96,8 @@ function liveSection(){
   const R=ids.map(i=>{const e=per(i);return[NAME(i),e.length,e.length?e.reduce((s,r)=>s+Math.abs(r[f(i)]-r.actual),0)/e.length:null,
    e.length?100*e.reduce((s,r)=>s+Math.abs(r[f(i)]-r.actual)/r.actual,0)/e.length:null]});
   return`<h3>${title}</h3>`+(R.some(r=>r[1])?table(["Forecast","Hours scored","Avg error (MW)","Avg error (%)"],R,[2,3])+(note?`<p>${note}</p>`:""):"<p>Nothing to score yet: results appear as hours pass and the IESO publishes the actual demand.</p>")};
- $("live").innerHTML=mk("_n","Next-hour forecasts (made an hour ahead)")+mk("_h","This-hour forecasts");
- const D=L.slice(-72);
+ $("live").innerHTML=mk("_n","Next-hour forecasts (made an hour ahead), whole project")+mk("_h","This-hour forecasts, whole project");
+ const D=(window.LOG||[]).slice(-72);
  if(D.length){const ids=ALL.filter(i=>i!="naive"&&SHOW.has(i)),f=i=>i+"_n";
   plot($("cr"),D.map((_,i)=>i),[{ys:D.map(r=>r.actual),color:css("--fg")},...ids.map(i=>({ys:D.map(r=>r[f(i)]),color:COL(i)}))],
    {xf:(x,j)=>D[j].t.slice(5,13).replace("T"," ")+"h"})}
