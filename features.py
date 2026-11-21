@@ -2,8 +2,10 @@
 import io
 import json
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from email.utils import parsedate_to_datetime
 from xml.etree import ElementTree
 
 import holidays
@@ -286,6 +288,39 @@ def fetch_recent_hours(csv, now, max_hours=72):
 
 ADEQUACY_BASE = "https://reports-public.ieso.ca/public/Adequacy3/"
 OUTLINE_FILE = "docs/adequacy_outline.txt"
+VERSIONS_FILE = "data/adequacy_versions.json"
+ADEQ_SRC = {}      # naive UTC hour -> name of the IESO file its forecast came from (filled by fetch_adequacy)
+ADEQ_PUB = {}      # naive UTC hour -> when that file was published (its Last-Modified time, naive UTC)
+_listing = None
+
+
+def _created_at(content):
+    m = re.search(rb"<CreatedAt>([^<]+)</CreatedAt>", content[:3000])
+    return m.group(1).decode() if m else None
+
+
+def _versioned_name(day, created):
+    """The permanent, versioned copy (PUB_Adequacy3_YYYYMMDD_vN.xml) of the dated report just read.
+    IESO overwrites the plain dated file with each new version but keeps every _vN file, so the versioned
+    name lets anyone check later exactly what the site saw. The directory listing is large, so it is read
+    only when a day's report has changed since the last run (about twice a day)."""
+    global _listing
+    cache = json.load(open(VERSIONS_FILE)) if os.path.exists(VERSIONS_FILE) else {}
+    if created and cache.get(day, {}).get("created") == created:
+        return cache[day]["file"]
+    if _listing is None:
+        _listing = requests.get(ADEQUACY_BASE, timeout=30).text
+    nums = [int(n) for n in re.findall(rf"PUB_Adequacy3_{day}_v(\d+)\.xml", _listing)]
+    if not nums or not created:
+        return None
+    name = f"PUB_Adequacy3_{day}_v{max(nums)}.xml"
+    if _created_at(requests.get(ADEQUACY_BASE + name, timeout=20).content) != created:
+        return None                                   # a newer version appeared in between: don't guess
+    cache = {d: v for d, v in cache.items() if d >= (pd.Timestamp(day) - pd.DateOffset(days=3)).strftime("%Y%m%d")}
+    cache[day] = {"created": created, "file": name}
+    os.makedirs("data", exist_ok=True)
+    json.dump(cache, open(VERSIONS_FILE, "w"), indent=0)
+    return name
 
 
 def _adequacy_groups(content, outline=False):
@@ -368,6 +403,26 @@ def _choose(groups, actual):
     raise RuntimeError(f"no candidate demand series; groups: {seen or 'none'}. See docs/adequacy_outline.txt")
 
 
+def adequacy_versions_before(name, back=8):
+    """Earlier versions of a versioned Adequacy file (PUB_Adequacy3_YYYYMMDD_vN.xml), newest first:
+    [(file name, published UTC, {hour ending: demand forecast MW})]. Used to find when a number first appeared."""
+    m = re.match(r"PUB_Adequacy3_(\d{8})_v(\d+)\.xml$", name or "")
+    if not m:
+        return []
+    out = []
+    for n in range(int(m.group(2)) - 1, max(int(m.group(2)) - 1 - back, 0), -1):
+        f = f"PUB_Adequacy3_{m.group(1)}_v{n}.xml"
+        try:
+            rr = requests.get(ADEQUACY_BASE + f, timeout=20)
+            rr.raise_for_status()
+            rows = _adequacy_groups(rr.content).get("DocBody/ForecastDemand/OntarioDemand/ForecastOntDemand/Demand", [])
+            pub = pd.Timestamp(parsedate_to_datetime(rr.headers["Last-Modified"])).tz_convert("UTC").tz_localize(None)
+        except Exception:
+            break
+        out.append((f, pub, {h: float(mw) for d, h, mw in rows}))
+    return out
+
+
 def fetch_adequacy(actual=None, days=0, today=None):
     """IESO's Adequacy Report: its hourly demand forecast. The undated newest report is for the furthest delivery
     day published (weeks ahead), so pass days>0 to add the dated daily files from `today` on (days=2: today and
@@ -384,14 +439,29 @@ def fetch_adequacy(actual=None, days=0, today=None):
             if time.monotonic() - t_start > 90:                                  # never let this hold up the update
                 first_err = first_err or "stopped after 90 s"
                 break
-            name = f"PUB_Adequacy3_{(d0 + pd.DateOffset(days=k)):%Y%m%d}.xml"
+            day = f"{(d0 + pd.DateOffset(days=k)):%Y%m%d}"
+            name = f"PUB_Adequacy3_{day}.xml"
             try:
                 rr = requests.get(ADEQUACY_BASE + name, timeout=20)
                 rr.raise_for_status()
                 g = _adequacy_groups(rr.content)
                 if path in g:
-                    s = s.combine_first(_series_of(g[path]))
+                    part = _series_of(g[path])
+                    s = s.combine_first(part)
                     ok += 1
+                    if k < 3:                                  # where the next three days' numbers came from
+                        try:
+                            src = _versioned_name(day, _created_at(rr.content))
+                        except Exception:
+                            src = None
+                        try:
+                            pub = pd.Timestamp(parsedate_to_datetime(rr.headers["Last-Modified"])).tz_convert("UTC").tz_localize(None)
+                        except Exception:
+                            pub = None
+                        for u in part.index:
+                            ADEQ_SRC[u] = src or name
+                            if pub is not None:
+                                ADEQ_PUB[u] = pub
                 else:
                     first_err = first_err or f"{name}: different layout"
             except Exception as e:

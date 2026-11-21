@@ -61,6 +61,12 @@ for r in read_js(LOG, "window.LOG=") or []:
         r.setdefault(k, None)
     log[r["u"]] = r
 prev_meta = read_js(LOG, "window.LOG_META=") or {}
+BACKFILL = "data/backfill_ieso.json"            # one-off reconstruction of past hours (tools/backfill_ieso_times.py)
+if os.path.exists(BACKFILL):
+    for k, rec in json.load(open(BACKFILL)).items():
+        if k in log and log[k].get("ieso_h") is not None and "ip" not in log[k]:
+            log[k].update(rec)
+    os.remove(BACKFILL)
 
 try:
     MODELS = {(fid, v): joblib.load(f"model/{fid}_{v}.joblib") for fid in FIDS for v in variants(fid)}
@@ -91,7 +97,7 @@ except Exception as e:
     note("IESO recent hours (5-minute reports)", False, e)
 dem = merge_demand(csv, recent, now)
 try:
-    adeq, info = fetch_adequacy(actual=dem, days=2, today=now)   # the undated report is for a day weeks ahead; today's and tomorrow's dated files cover now
+    adeq, info = fetch_adequacy(actual=dem, days=3, today=now)   # the undated report is for a day weeks ahead; the dated files cover today and the next two days
     note("IESO forecast report", True, info)
 except Exception as e:
     note("IESO forecast report", False, e)
@@ -115,10 +121,19 @@ def get_row(idx):
     return log[k]
 
 
+WALL = pd.Timestamp.now(tz="UTC").tz_localize(None)    # when this run happened (for the logs page)
+
+
+def stamp(row, key):
+    """Remember when a value was saved: minutes after the start of the row's hour (negative = before the hour)."""
+    row.setdefault("at", {})[key] = int((WALL - pd.Timestamp(row["u"])).total_seconds() // 60)
+
+
 def fill(row, key, value, live):
     """Store a prediction once (they are frozen); one not made on time marks the row as retrospective."""
     if row[key] is None:
         row[key] = round(float(value), 1)
+        stamp(row, key)
         if not live:
             row["bf"] = 1
 
@@ -131,14 +146,124 @@ for fid in FIDS:
         if len(X):
             for idx, p in zip(X.index, m.predict(X)):
                 fill(get_row(idx), fid + suffix, p, idx == end)
+# ---------------------------------------------------------------- the IESO's forecast: when it was published, and
+# what each model was predicting at that moment. The IESO republishes its forecast every 30 minutes; for every
+# upcoming hour we track its current value, when that value first appeared, and the history of each model's
+# latest prediction for the hour (7-day run, then next-hour, then this-hour). When the IESO's number for an hour
+# is saved, the models' predictions made at or before its publication are saved beside it.
+TRACK = "data/ieso_track.json"
+track = json.load(open(TRACK)) if os.path.exists(TRACK) else {}
+fc_prev = read_js(FC_FILE, "window.FC=") or {}
+fc_ix = {k: i for i, k in enumerate(fc_prev.get("u", []))}
+iso = lambda t: pd.Timestamp(t).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def latest_model_values(k):
+    """Each model's newest prediction for hour k as of this run: (made, value, source)."""
+    r, out = log.get(k), {}
+    for fid in FIDS:
+        got = None
+        for sfx, src in (("_h", "h"), ("_n", "n")):
+            if r and r.get(fid + sfx) is not None:
+                at = (r.get("at") or {}).get(fid + sfx)
+                made = pd.Timestamp(k) + pd.DateOffset(minutes=at) if at is not None else WALL
+                got = (iso(made), r[fid + sfx], src)
+                break
+        if got is None and k in fc_ix and fc_prev.get("m", {}).get(fid):
+            v = fc_prev["m"][fid][fc_ix[k]]
+            if v is not None:
+                got = (iso(pd.Timestamp(fc_prev["updated"]).tz_convert("UTC").tz_localize(None)), float(v), "7d")
+        if got:
+            out[fid] = got
+    return out
+
+
+older = {}
+for idx in sorted(ft.ADEQ_SRC):
+    k = ukey(idx)
+    if idx < now or idx not in ieso.index or np.isnan(ieso[idx]) or (k in log and log[k].get("ieso_h") is not None):
+        continue
+    v, pub = round(float(ieso[idx]), 1), ft.ADEQ_PUB.get(idx)
+    e = track.get(k)
+    if e is None or e["v"] != v:                     # new hour, or the IESO changed its number: a new "first published"
+        first, file = int(e is None), ft.ADEQ_SRC[idx]
+        if e is None:                                # first sight: the number may be older; look back through versions
+            if file not in older:
+                older[file] = ft.adequacy_versions_before(file)
+            he = (idx - pd.DateOffset(hours=5)).hour + 1
+            for f, p, vals in older[file]:
+                if vals.get(he) != v:
+                    first = 0                        # found the version before it changed: the time is exact
+                    break
+                file, pub = f, p
+        e = dict(v=v, pub=iso(pub) if pub is not None else None, first=first, file=file, m=(e or {}).get("m", {}))
+        track[k] = e
+    for fid, item in latest_model_values(k).items():
+        hist = e["m"].setdefault(fid, [])
+        if not hist or hist[-1][1:] != list(item[1:]):
+            hist.append(list(item))
+            del hist[:-8]
+track = {k: e for k, e in track.items() if k >= ukey(now - pd.DateOffset(hours=2))}
+
+
+def models_at_ieso(r):
+    """Copy, into the row, when the IESO's saved number was first published and each model's prediction then."""
+    e = track.get(r["u"])
+    if not e or e["v"] != r["ieso_h"] or not e.get("pub"):
+        return
+    start, T = pd.Timestamp(r["u"]), pd.Timestamp(e["pub"])
+    rel = lambda t: int((pd.Timestamp(t) - start).total_seconds() // 60)
+    r.update(ip=rel(T), ipf=e["first"], iv=e["file"], mi={}, mim={}, mis={})
+    late = 0
+    for fid, hist in e["m"].items():
+        before = [h for h in hist if pd.Timestamp(h[0]) <= T]
+        made, v, src = before[-1] if before else hist[0]
+        late |= not before
+        r["mi"][fid], r["mim"][fid], r["mis"][fid] = round(v, 1), rel(made), src
+    if late:
+        r["mil"] = 1        # some model had nothing saved before the IESO published (tracking began later)
+
+
 for idx, key in ((now, "ieso_h"), (nxt, "ieso_n")):    # IESO's forecast, captured when it was a genuine forecast
     if idx in ieso.index and idx in F.index and not np.isnan(ieso[idx]) and get_row(idx)[key] is None:
-        log[ukey(idx)][key] = round(float(ieso[idx]), 1)
+        r = log[ukey(idx)]
+        r[key] = round(float(ieso[idx]), 1)
+        stamp(r, key)
+        if idx in ft.ADEQ_SRC:                         # the IESO file the number was read from
+            r.setdefault("f", {})[key] = ft.ADEQ_SRC[idx]
+        if key == "ieso_h":
+            models_at_ieso(r)
+os.makedirs("data", exist_ok=True)
+json.dump(track, open(TRACK, "w"), separators=(",", ":"))
 for r in log.values():                                 # actuals: official hourly file first, then the 5-minute reports
     ts = pd.Timestamp(r["u"])
     if ts in dem.index:
         r["actual"] = float(dem[ts])
+        r["src"] = "csv" if ts in csv.index else "5min"      # yearly file, or the hour's 5-minute report
 rows = sorted(log.values(), key=lambda r: r["u"])[-KEEP:]
+
+
+# ---------------------------------------------------------------- whole-project archive of every scored hour
+# The log above keeps 14 days; this compact copy of every completed hour is never trimmed, so accuracy can be
+# compared across the whole project. Each run refreshes the hours still in the log (actuals can be refined).
+ARC_FILE = "docs/score_archive.js"
+SEED = "data/archive_seed.json"                 # every hour logged before the archive existed (from git history)
+arc = read_js(ARC_FILE, "window.ARC=") or (json.load(open(SEED)) if os.path.exists(SEED) else {"ids": FIDS, "rows": []})
+if os.path.exists(SEED):
+    os.remove(SEED)
+by_u = {a["u"]: a for a in arc["rows"]}
+for r in rows:
+    if r.get("actual") is None or r["u"] >= ukey(now):
+        continue
+    a = dict(u=r["u"], a=r["actual"], bf=r.get("bf", 1), h=[r.get(f + "_h") for f in FIDS],
+             n=[r.get(f + "_n") for f in FIDS], i=r.get("ieso_h"))
+    if r.get("mi"):
+        a.update(ip=r.get("ip"), ipf=r.get("ipf", 0), m=[r["mi"].get(f) for f in FIDS], mm=[r["mim"].get(f) for f in FIDS])
+        if r.get("mil"):
+            a["ml"] = 1
+    by_u[r["u"]] = a
+with open(ARC_FILE, "w") as fh:
+    fh.write("window.ARC=" + json.dumps({"ids": FIDS, "rows": [by_u[k] for k in sorted(by_u)]}, separators=(",", ":")) + ";")
 
 # ---------------------------------------------------------------- live demand so far this hour
 meta = {"updated": pd.Timestamp.now(tz="UTC").isoformat()}

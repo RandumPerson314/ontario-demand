@@ -1,0 +1,50 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><script src="nav.js"></script>
+<link rel="stylesheet" href="model.css"><title>Data logs</title>
+<style>
+.ctl2{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin:10px 0}.ctl2 label{display:inline-flex;gap:6px;align-items:center;margin:0}
+.ctl2 button{margin:0}
+.tw{overflow:auto;max-height:75vh;border:1px solid var(--bd);border-radius:10px}
+table.log{margin:0;font-size:12.5px;white-space:nowrap}table.log th{position:sticky;top:0;background:var(--card);z-index:2;vertical-align:bottom;font-size:11.5px;text-align:right;white-space:normal;min-width:84px}
+table.log td:first-child,table.log th:first-child{position:sticky;left:0;background:var(--bg);z-index:1;text-align:left}table.log th:first-child{z-index:3;background:var(--card)}
+table.log td{vertical-align:top}table.log small{display:block;color:var(--mut);font-size:11px}table.log a{color:inherit}
+table.log tr.day td{background:var(--card);font-weight:700;text-align:left;position:static}
+.sw{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}
+.pos{color:#c92a2a}.neg{color:#1971c2}@media(prefers-color-scheme:dark){.pos{color:#ff8787}.neg{color:#74c0fc}}
+.src li{margin:8px 0;font-size:14px;color:var(--fg)}.src code{background:var(--card);padding:1px 5px;border-radius:5px;font-size:12.5px}
+.hint{font-size:13px;color:var(--fg)}.k{display:inline-block;border-radius:6px;padding:0 6px;font-size:11px;border:1px solid var(--bd)}
+</style></head><body><main>
+<h1>Data logs</h1>
+<p class="lead">Every number the site has saved, hour by hour: actual demand, the IESO's official forecast, and each model's prediction, with a link to the official IESO file each IESO number came from, so you can check any of them yourself.</p>
+<div id="banner" class="warn" style="display:none"></div>
+
+<div class="ctl2">
+ <label>Day <select id="day"></select></label>
+ <label>Predictions <select id="kind"><option value="_h">this-hour (made during the hour)</option><option value="_n">next-hour (made the hour before)</option><option value="_i">at the IESO's time (newest made when the IESO published)</option></select></label>
+ <label><input type="checkbox" id="diff" checked> show miss vs actual</label>
+ <button id="dl">Download everything (CSV)</button>
+</div>
+<div class="tw"><table class="log" id="tb"></table></div>
+<p id="cnt"></p>
+
+<div class="panel" style="margin-top:14px">
+<h2>How to read a row</h2>
+<p class="hint"><b>Hour</b> is Toronto time, labelled by when the hour starts ("14:00" = 2:00 to 3:00 pm). The IESO labels the same hour by its <b>date and "hour ending" in Eastern Standard Time</b> all year (EST, no daylight saving), shown under each hour: in winter "14:00" Toronto is <i>hour ending 15</i>; in summer (EDT) it is <i>hour ending 14</i>. Use that date and hour ending when looking a number up in an IESO file.</p>
+<p class="hint"><b>Actual</b>: the source says which IESO file it came from. <span class="k">yearly file</span> = the official hourly file (IESO adds each day about a day later). <span class="k">5-min report</span> = the average of the 12 five-minute readings in that hour's own report, used until the yearly file catches up (the two agree to within about 1 MW).</p>
+<p class="hint"><b>IESO forecast</b>: the value saved from the IESO's Adequacy report, with the exact file version and the time it was saved. <b>Model columns</b>: each model's saved prediction; the small number is its miss (prediction minus actual: red = too high, blue = too low). <b>Saved</b> is when the predictions were made, in Toronto time. <b>Timing</b> says whether every prediction in the row was made live (<i>on time</i>) or some were calculated later from past data (<i>after the fact</i>, e.g. when an update didn't run).</p>
+<p class="hint"><b>At the IESO's time</b>: for each hour, the time the IESO <i>first</i> published the forecast number the site scored (the earliest of an unbroken run of report versions with that same value; IESO republishes every 30 minutes, often without changing a given hour), and each model's newest prediction made at or before that moment, with where it came from (the hourly 7-day run, or the next-hour prediction if the IESO published within the last hour). Hours before 21 November 2026 were rebuilt from the site's own commit history and the IESO's archived report versions (<code>tools/backfill_ieso_times.py</code>).</p>
+<p class="hint">Rows saved before 20 November 2026 don't have save times or IESO file versions. For those, the link goes to the day's latest Adequacy file, which may be a newer version than the one the site read; the directory listing shows every version with its publication time.</p>
+</div>
+
+<div class="panel">
+<h2>Official sources</h2>
+<ul class="src">
+<li><b>Hourly demand, official:</b> <a href="https://reports-public.ieso.ca/public/Demand/" target="_blank" rel="noopener">reports-public.ieso.ca/public/Demand/</a>, file <code>PUB_Demand_YYYY.csv</code> (one per year). Find the row whose <code>Date</code> and <code>Hour</code> (hour ending, EST) match, and read the <code>Ontario Demand</code> column.</li>
+<li><b>Five-minute readings, one file per hour:</b> <a href="https://reports-public.ieso.ca/public/RealtimeTotals/" target="_blank" rel="noopener">reports-public.ieso.ca/public/RealtimeTotals/</a>, file <code>PUB_RealtimeTotals_YYYYMMDDHH.xml</code> (EST date + hour ending). Average the 12 <code>EnergyMW</code> values whose <code>MarketQuantity</code> is <code>ONTARIO DEMAND</code>. The IESO keeps these for about a month. <code>PUB_RealtimeTotals.xml</code> (no date) is the hour in progress, used for "this hour so far".</li>
+<li><b>The IESO's forecast:</b> <a href="https://reports-public.ieso.ca/public/Adequacy3/" target="_blank" rel="noopener">reports-public.ieso.ca/public/Adequacy3/</a>, the Adequacy report, one file per delivery day (<code>PUB_Adequacy3_YYYYMMDD.xml</code>). The IESO republishes it many times; each version stays available as <code>..._vN.xml</code>, which is what each row links to. Read <code>DocBody › ForecastDemand › OntarioDemand › ForecastOntDemand › Demand</code>, the <code>EnergyMW</code> for the matching <code>DeliveryHour</code> (hour ending, EST). Opening a file in a browser shows it as a formatted report.</li>
+<li><b>The IESO's own charts:</b> <a href="https://www.ieso.ca/power-data" target="_blank" rel="noopener">ieso.ca/power-data</a>. Its "Ontario Demand" chart shows <i>Hourly</i> (actual) and <i>Projected Hourly</i> (forecast) for the last few days, for a quick visual check. Note that its headline "Ontario Demand at H:00 EST" number can be one hour older than the label says.</li>
+<li><b>This site's own record:</b> every update is saved as a commit on GitHub, so the <a href="https://github.com/RandumPerson314/ontario-demand/commits/main/docs/demand_log.js" target="_blank" rel="noopener">history of <code>docs/demand_log.js</code></a> shows exactly when each number first appeared and that predictions were never changed afterwards.</li>
+</ul>
+</div>
+<script src="demand_log.js"></script><script src="common.js"></script><script src="logs.js"></script>
+</main></body></html>
